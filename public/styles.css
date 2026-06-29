@@ -217,6 +217,15 @@ th {
   background: #eef5f7;
 }
 
+.active-tool-controls {
+  margin-top: 14px;
+}
+
+.active-tool-actions {
+  justify-content: flex-start;
+  margin-top: 14px;
+}
+
 input[readonly] {
   color: #4f6375;
   cursor: not-allowed;

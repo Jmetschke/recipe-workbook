@@ -38,8 +38,12 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
 
   const percentTotal = normalizedIngredients.reduce((sum, item) => sum + number(item.formula_percent), 0);
   const batchTotal = normalizedIngredients.reduce((sum, item) => sum + number(item.batch_qty), 0);
-  const activeIngredientGrams = potencyPercent > 0 && targetMg > 0 && estimatedYield > 0
-    ? (targetMg * estimatedYield) / (potencyPercent * 1000)
+  const activeMassPerUnitMg = potencyPercent > 0 && targetMg > 0
+    ? targetMg / potencyPercent
+    : 0;
+  const activeMassPerUnitGrams = activeMassPerUnitMg / 1000;
+  const activeIngredientGrams = activeMassPerUnitGrams > 0 && estimatedYield > 0
+    ? activeMassPerUnitGrams * estimatedYield
     : 0;
   const warnings = [];
 
@@ -62,6 +66,10 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
     batch_total: batchTotal,
     estimated_yield: estimatedYield,
     active_ingredient_grams: activeIngredientGrams,
+    total_active_additive_grams: activeIngredientGrams,
+    active_mass_per_unit_mg: activeMassPerUnitMg,
+    active_mass_per_unit_grams: activeMassPerUnitGrams,
+    potency_fraction: potencyPercent,
     additive_limit_percent: additiveLimit,
     warnings,
     ingredients: normalizedIngredients
