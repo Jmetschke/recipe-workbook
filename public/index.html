@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Recipe Manager</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">Recipe Manager</div>
+      <button class="nav active" data-view="dashboard">Dashboard</button>
+      <button class="nav" data-view="import">Import</button>
+      <button class="nav" data-view="drafts">Draft Recipes</button>
+      <button class="nav" data-view="cards">Published Cards</button>
+      <button class="nav" data-view="ingredients">Ingredients</button>
+      <button class="nav" data-view="settings">Settings</button>
+    </aside>
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">Dashboard</h1>
+          <p id="pageSubtitle">Recipes, drafts, published cards, and import tools.</p>
+        </div>
+        <div class="top-actions">
+          <button id="newRecipeBtn" class="primary">New Recipe</button>
+          <button id="importShortcutBtn">Import Spreadsheet</button>
+        </div>
+      </header>
+      <section id="toast" class="toast hidden"></section>
+      <section id="content"></section>
+    </main>
+
+    <template id="recipeRowTemplate">
+      <tr>
+        <td><input data-field="ingredient_name"></td>
+        <td><input data-field="description"></td>
+        <td><input type="number" step="any" data-field="formula_qty"></td>
+        <td><input type="number" step="any" data-field="formula_percent"></td>
+        <td><input type="number" step="any" data-field="batch_qty" class="calculated" readonly></td>
+        <td><input data-field="unit"></td>
+        <td><input data-field="phase"></td>
+        <td><input data-field="vendor"></td>
+        <td><input data-field="lot_number"></td>
+        <td><input type="number" step="any" data-field="cost_per_unit"></td>
+        <td><input type="number" step="any" data-field="calculated_cost" class="calculated" readonly></td>
+        <td><input data-field="notes"></td>
+        <td><button class="icon danger" data-action="removeIngredient">×</button></td>
+      </tr>
+    </template>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

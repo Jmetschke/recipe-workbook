@@ -1,0 +1,26 @@
+{
+  "name": "recipe-manufacturing-manager",
+  "version": "1.0.0",
+  "description": "Recipe management web app for importing, editing, publishing, and printing manufacturing recipe cards.",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jmetschke/recipe-workbook.git"
+  },
+  "homepage": "https://github.com/Jmetschke/recipe-workbook",
+  "bugs": {
+    "url": "https://github.com/Jmetschke/recipe-workbook/issues"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.4",
+    "express": "^4.19.2",
+    "multer": "^2.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
