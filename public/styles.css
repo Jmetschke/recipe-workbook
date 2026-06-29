@@ -188,7 +188,7 @@ th {
 }
 
 .ingredient-table {
-  min-width: 1280px;
+  min-width: 980px;
 }
 
 .ingredient-table input {
@@ -201,9 +201,73 @@ th {
   background: #eef5f7;
 }
 
+.batch-heading {
+  min-width: 180px;
+}
+
+.batch-qty-field,
+.batch-qty-display {
+  color: #102a43;
+  font-size: clamp(20px, 2.8vw, 34px);
+  font-weight: 900;
+  text-align: right;
+}
+
+.batch-qty-display {
+  background: #eef5f7;
+}
+
 input[readonly] {
   color: #4f6375;
   cursor: not-allowed;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calendar-weekdays {
+  color: var(--muted);
+  font-weight: 800;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.calendar-cell {
+  min-height: 132px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+}
+
+.muted-cell {
+  background: #f1f5f8;
+}
+
+.calendar-day {
+  color: var(--muted);
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+
+.calendar-recipe {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  margin: 5px 0;
+  border-color: #b7d2df;
+  background: #eef8fb;
+  text-align: left;
+  padding: 7px;
+}
+
+.calendar-recipe span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .match-review td {

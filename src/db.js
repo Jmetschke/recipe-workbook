@@ -43,11 +43,16 @@ async function migrate() {
       current_version TEXT DEFAULT '',
       has_unpublished_changes INTEGER DEFAULT 0,
       batch_size REAL DEFAULT 0,
+      batch_size_mode TEXT DEFAULT 'grams',
       batch_unit TEXT DEFAULT 'grams',
       unit_weight REAL DEFAULT 0,
       unit_weight_unit TEXT DEFAULT 'grams',
       target_mg_per_unit REAL DEFAULT 0,
       potency_percent REAL DEFAULT 0,
+      expected_production_date TEXT DEFAULT '',
+      copied_from_recipe_id INTEGER,
+      copy_lock_formula INTEGER DEFAULT 0,
+      is_new_recipe_duplicate INTEGER DEFAULT 0,
       notes TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -122,6 +127,11 @@ async function migrate() {
   await addColumnIfMissing("recipe_ingredients", "original_ingredient_name", "TEXT DEFAULT ''");
   await addColumnIfMissing("recipe_ingredients", "match_confidence", "REAL DEFAULT 1");
   await addColumnIfMissing("recipe_ingredients", "match_status", "TEXT DEFAULT 'matched'");
+  await addColumnIfMissing("recipes", "expected_production_date", "TEXT DEFAULT ''");
+  await addColumnIfMissing("recipes", "batch_size_mode", "TEXT DEFAULT 'grams'");
+  await addColumnIfMissing("recipes", "copied_from_recipe_id", "INTEGER");
+  await addColumnIfMissing("recipes", "copy_lock_formula", "INTEGER DEFAULT 0");
+  await addColumnIfMissing("recipes", "is_new_recipe_duplicate", "INTEGER DEFAULT 0");
   await execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ["additive_percent_limit", "4"]);
   await seedInventoryIngredients();
 }
@@ -141,14 +151,28 @@ function recipeFromRow(row) {
   return {
     ...row,
     has_unpublished_changes: Boolean(row.has_unpublished_changes),
+    copy_lock_formula: Boolean(row.copy_lock_formula),
+    is_new_recipe_duplicate: Boolean(row.is_new_recipe_duplicate),
     notes: row.notes ? JSON.parse(row.notes) : []
   };
+}
+
+function ingredientFromRow(row) {
+  if (!row) return null;
+  const {
+    phase,
+    lot_number,
+    cost_per_unit,
+    calculated_cost,
+    ...ingredient
+  } = row;
+  return ingredient;
 }
 
 async function getRecipe(id) {
   const recipe = recipeFromRow(await get("SELECT * FROM recipes WHERE id = ?", [id]));
   if (!recipe) return null;
-  recipe.ingredients = await all("SELECT * FROM recipe_ingredients WHERE recipe_id = ? ORDER BY sort_order, id", [id]);
+  recipe.ingredients = (await all("SELECT * FROM recipe_ingredients WHERE recipe_id = ? ORDER BY sort_order, id", [id])).map(ingredientFromRow);
   recipe.steps = await all("SELECT * FROM recipe_steps WHERE recipe_id = ? ORDER BY sort_order, id", [id]);
   recipe.calculations = calculateRecipe(recipe, recipe.ingredients, await allSettings());
   return recipe;
@@ -191,11 +215,11 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
         item.formula_percent || 0,
         item.batch_qty || 0,
         item.unit || "grams",
-        item.phase || "",
+        "",
         item.vendor || "",
-        item.lot_number || "",
-        item.cost_per_unit || 0,
-        item.calculated_cost || 0,
+        "",
+        0,
+        0,
         item.notes || "",
         item.original_ingredient_name || item.ingredient_name || "",
         item.match_confidence ?? 1,
@@ -216,9 +240,10 @@ async function createRecipe(input) {
   const calculations = calculateRecipe(input, input.ingredients || [], await allSettings());
   const info = await execute(
     `INSERT INTO recipes (
-      name, product_type, flavor, status, current_version, has_unpublished_changes, batch_size, batch_unit,
-      unit_weight, unit_weight_unit, target_mg_per_unit, potency_percent, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      name, product_type, flavor, status, current_version, has_unpublished_changes, batch_size, batch_size_mode, batch_unit,
+      unit_weight, unit_weight_unit, target_mg_per_unit, potency_percent, expected_production_date,
+      copied_from_recipe_id, copy_lock_formula, is_new_recipe_duplicate, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name || "Untitled Recipe",
       input.product_type || "",
@@ -227,11 +252,16 @@ async function createRecipe(input) {
       input.current_version || "",
       input.has_unpublished_changes ? 1 : 0,
       input.batch_size || 0,
-      input.batch_unit || "grams",
+      input.batch_size_mode === "units" ? "units" : "grams",
+      "grams",
       input.unit_weight || 0,
       input.unit_weight_unit || "grams",
       input.target_mg_per_unit || 0,
       input.potency_percent || 0,
+      input.expected_production_date || "",
+      input.copied_from_recipe_id || null,
+      input.copy_lock_formula ? 1 : 0,
+      input.is_new_recipe_duplicate ? 1 : 0,
       JSON.stringify(input.notes || [])
     ]
   );
@@ -245,12 +275,23 @@ async function updateRecipe(id, input) {
   const existing = await getRecipe(id);
   if (!existing) return null;
   const next = { ...existing, ...input };
-  const calculations = calculateRecipe(next, input.ingredients || existing.ingredients, await allSettings());
+  const formulaLocked = existing.copy_lock_formula || existing.status === "Published";
+  const incomingIngredients = input.ingredients || existing.ingredients;
+  const ingredientsForCalculation = formulaLocked
+    ? incomingIngredients.map((item, index) => ({
+      ...item,
+      formula_qty: existing.ingredients[index]?.formula_qty ?? item.formula_qty,
+      formula_percent: existing.ingredients[index]?.formula_percent ?? item.formula_percent,
+      batch_qty: ""
+    }))
+    : incomingIngredients;
+  const calculations = calculateRecipe(next, ingredientsForCalculation, await allSettings());
   const publishedDirty = existing.status === "Published" || existing.current_version;
   await execute(
     `UPDATE recipes SET
-      name = ?, product_type = ?, flavor = ?, status = ?, has_unpublished_changes = ?, batch_size = ?, batch_unit = ?,
-      unit_weight = ?, unit_weight_unit = ?, target_mg_per_unit = ?, potency_percent = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+      name = ?, product_type = ?, flavor = ?, status = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
+      unit_weight = ?, unit_weight_unit = ?, target_mg_per_unit = ?, potency_percent = ?, expected_production_date = ?,
+      copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
     [
       next.name || "Untitled Recipe",
@@ -259,11 +300,16 @@ async function updateRecipe(id, input) {
       next.status === "Archived" ? "Archived" : "Draft",
       publishedDirty ? 1 : 0,
       next.batch_size || 0,
-      next.batch_unit || "grams",
+      next.batch_size_mode === "units" ? "units" : "grams",
+      "grams",
       next.unit_weight || 0,
       next.unit_weight_unit || "grams",
       next.target_mg_per_unit || 0,
       next.potency_percent || 0,
+      next.expected_production_date || "",
+      next.copied_from_recipe_id || null,
+      next.copy_lock_formula ? 1 : 0,
+      next.is_new_recipe_duplicate ? 1 : 0,
       JSON.stringify(next.notes || []),
       id
     ]
@@ -284,7 +330,12 @@ async function nextVersion(recipeId) {
 async function publishRecipe(id, publishedBy = "Production") {
   const recipe = await getRecipe(id);
   if (!recipe) return null;
-  const version = await nextVersion(id);
+  if (!recipe.expected_production_date) {
+    const error = new Error("Expected production date is required before publishing.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const version = recipe.copy_lock_formula && recipe.current_version ? recipe.current_version : await nextVersion(id);
   const calculations = calculateRecipe(recipe, recipe.ingredients, await allSettings());
   await execute(
     `INSERT INTO recipe_versions (
@@ -305,6 +356,26 @@ async function publishRecipe(id, publishedBy = "Production") {
     [version, id]
   );
   return getRecipe(id);
+}
+
+async function deleteRecipe(id) {
+  const info = await execute("DELETE FROM recipes WHERE id = ?", [id]);
+  return Boolean(info.rowsAffected);
+}
+
+async function duplicateRecipe(id, options = {}) {
+  const recipe = await getRecipe(id);
+  if (!recipe) return null;
+  return createRecipe({
+    ...recipe,
+    name: options.startNewRecipe ? `${recipe.name} New Recipe` : `${recipe.name} Copy`,
+    status: "Draft",
+    current_version: options.startNewRecipe ? "" : recipe.current_version,
+    has_unpublished_changes: false,
+    copied_from_recipe_id: recipe.id,
+    copy_lock_formula: options.startNewRecipe ? false : true,
+    is_new_recipe_duplicate: Boolean(options.startNewRecipe)
+  });
 }
 
 async function archiveRecipe(id) {
@@ -430,9 +501,9 @@ function seedIngredientsStick() {
     formula_qty: row[1],
     formula_percent: row[2],
     batch_qty: row[3],
-    unit: "grams",
-    vendor: row[4],
-    cost_per_unit: row[5],
+      unit: "grams",
+      vendor: row[4],
+      cost_per_unit: row[5],
     phase: index < 8 ? "Oil phase" : "Cool-down"
   }));
 }
@@ -446,7 +517,9 @@ async function seed() {
     product_type: "Topical Stick Rub",
     flavor: "Peppermint",
     batch_size: 30,
+    batch_size_mode: "grams",
     batch_unit: "grams",
+    expected_production_date: "",
     unit_weight: 30,
     unit_weight_unit: "grams",
     target_mg_per_unit: 50,
@@ -467,7 +540,9 @@ async function seed() {
     product_type: "Gummy",
     flavor: "Hybrid",
     batch_size: 75000,
+    batch_size_mode: "grams",
     batch_unit: "grams",
+    expected_production_date: "",
     unit_weight: 10,
     unit_weight_unit: "grams",
     target_mg_per_unit: 47,
@@ -506,7 +581,9 @@ module.exports = {
   createRecipe,
   updateRecipe,
   publishRecipe,
+  duplicateRecipe,
   archiveRecipe,
+  deleteRecipe,
   listVersions,
   getVersion,
   createImportJob,

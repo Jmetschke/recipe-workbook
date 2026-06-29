@@ -72,13 +72,11 @@ function parseStickRubWorkbook(workbook) {
   const recipeSheet = workbook.SheetNames.find((name) => key(name) === "recipe") || workbook.SheetNames[0];
   const ingredientSheet = workbook.SheetNames.find((name) => key(name).includes("ingredient list"));
   const sopSheet = workbook.SheetNames.find((name) => key(name).includes("sop"));
-  const costSheet = workbook.SheetNames.find((name) => key(name).includes("cost"));
   const rows = readSheet(workbook, recipeSheet);
   const headerIndex = findRow(rows, ["trade name", "formula", "batch"]);
   const header = rows[headerIndex] || [];
   const col = (contains) => header.findIndex((cell) => key(cell).includes(contains));
   const nameCol = col("trade name");
-  const descCol = col("description");
   const formulaCol = col("formula");
   const percentCol = col("qty %");
   const batchCol = col("batch");
@@ -96,40 +94,13 @@ function parseStickRubWorkbook(workbook) {
     ingredients.push({
       sort_order: ingredients.length + 1,
       ingredient_name: ingredientName,
-      description: clean(row[descCol]),
       formula_qty: number(row[formulaCol]),
       formula_percent: normalizePercent(row[percentCol]),
       batch_qty: number(row[batchCol]),
       unit: "grams",
-      phase: "",
       vendor: "",
-      lot_number: clean(row[vendorCol]),
-      cost_per_unit: 0,
-      calculated_cost: 0,
       notes: actualCol >= 0 && clean(row[actualCol]) ? `Actual qty: ${clean(row[actualCol])}` : ""
     });
-  }
-
-  if (costSheet) {
-    const costRows = readSheet(workbook, costSheet);
-    const costHeaderIndex = findRow(costRows, ["ingredient name", "price"]);
-    const costHeader = costRows[costHeaderIndex] || [];
-    const costNameCol = costHeader.findIndex((cell) => key(cell).includes("ingredient"));
-    const costPerCol = costHeader.findIndex((cell) => key(cell).includes("price"));
-    const calcCostCol = costHeader.findIndex((cell) => key(cell) === "cost");
-    const sourceCol = costHeader.findIndex((cell) => key(cell).includes("source"));
-    const costs = new Map();
-    for (let i = costHeaderIndex + 1; i < costRows.length; i += 1) {
-      const row = costRows[i];
-      if (clean(row[costNameCol])) {
-        costs.set(key(row[costNameCol]), {
-          cost_per_unit: number(row[costPerCol]),
-          calculated_cost: number(row[calcCostCol]),
-          vendor: clean(row[sourceCol])
-        });
-      }
-    }
-    ingredients.forEach((item) => Object.assign(item, costs.get(key(item.ingredient_name)) || {}));
   }
 
   const stepRows = sopSheet ? readSheet(workbook, sopSheet) : [];
@@ -143,6 +114,7 @@ function parseStickRubWorkbook(workbook) {
     product_type: "Topical Stick Rub",
     flavor: "",
     batch_size: ingredients.reduce((sum, item) => sum + number(item.batch_qty), 0) || targetQty,
+    batch_size_mode: "grams",
     batch_unit: "grams",
     unit_weight: 30,
     unit_weight_unit: "grams",
@@ -185,16 +157,11 @@ function parseGummySheet(workbook, sheetName) {
     ingredients.push({
       sort_order: ingredients.length + 1,
       ingredient_name: ingredientName,
-      description: "",
       formula_qty: number(row[amountCol]),
       formula_percent: normalizePercent(row[percentCol]),
       batch_qty: number(row[amountCol]),
       unit: "grams",
-      phase: /additive/i.test(ingredientName) ? "Active/Additive" : "Base",
       vendor: "",
-      lot_number: "",
-      cost_per_unit: 0,
-      calculated_cost: 0,
       notes: [clean(row[amountAddedCol]) && `Amount added: ${clean(row[amountAddedCol])}`, clean(row[performedByCol]) && `Performed by: ${clean(row[performedByCol])}`].filter(Boolean).join("; ")
     });
   }
@@ -215,6 +182,7 @@ function parseGummySheet(workbook, sheetName) {
     product_type: titleParts.product_type,
     flavor: titleParts.flavor,
     batch_size: batchSize,
+    batch_size_mode: "grams",
     batch_unit: "grams",
     unit_weight: unitWeight,
     unit_weight_unit: "grams",

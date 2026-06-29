@@ -3,6 +3,7 @@ const state = {
   recipes: [],
   ingredientsMaster: [],
   currentRecipe: null,
+  editorMode: "draft",
   importPreview: null,
   selectedImportIndexes: new Set()
 };
@@ -22,6 +23,91 @@ function pct(value) {
 
 function qty(value) {
   return Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
+}
+
+function isoToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function monthKey(dateString = isoToday()) {
+  return (dateString || isoToday()).slice(0, 7);
+}
+
+function monthLabel(key) {
+  const [year, month] = key.split("-").map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function batchInputLabel(recipe) {
+  return recipe.batch_size_mode === "units"
+    ? `${qty(recipe.batch_size)} units`
+    : `${qty(recipe.batch_size)} grams`;
+}
+
+function numeric(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizePercentInput(value) {
+  const parsed = numeric(value);
+  return parsed > 1 ? parsed / 100 : parsed;
+}
+
+function calculateClientRecipe(recipe) {
+  const ingredients = recipe.ingredients || [];
+  const batchSizeInput = numeric(recipe.batch_size);
+  const unitWeight = numeric(recipe.unit_weight);
+  const batchSizeMode = recipe.batch_size_mode === "units" ? "units" : "grams";
+  const totalBatchGrams = batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
+  const targetMg = numeric(recipe.target_mg_per_unit);
+  const potencyPercent = normalizePercentInput(recipe.potency_percent);
+  const formulaTotal = ingredients.reduce((sum, item) => sum + numeric(item.formula_qty), 0);
+  const estimatedYield = batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
+
+  const normalizedIngredients = ingredients.map((item) => {
+    const formulaPercent = formulaTotal > 0
+      ? numeric(item.formula_qty) / formulaTotal
+      : normalizePercentInput(item.formula_percent);
+    const batchQty = formulaPercent * totalBatchGrams;
+    return {
+      ...item,
+      formula_qty: numeric(item.formula_qty),
+      formula_percent: formulaPercent,
+      batch_qty: batchQty
+    };
+  });
+
+  const percentTotal = normalizedIngredients.reduce((sum, item) => sum + numeric(item.formula_percent), 0);
+  const batchTotal = normalizedIngredients.reduce((sum, item) => sum + numeric(item.batch_qty), 0);
+  const activeIngredientGrams = potencyPercent > 0 && targetMg > 0 && estimatedYield > 0
+    ? (targetMg * estimatedYield) / (potencyPercent * 1000)
+    : 0;
+  const warnings = [];
+
+  if (Math.abs(percentTotal - 1) > 0.005) {
+    warnings.push(`Formula percentages total ${(percentTotal * 100).toFixed(2)}%, not 100%.`);
+  }
+
+  normalizedIngredients.forEach((item) => {
+    const name = `${item.ingredient_name || ""}`.toLowerCase();
+    if ((name.includes("additive") || name.includes("concentrate") || name.includes("active")) && item.formula_percent * 100 > 4) {
+      warnings.push(`${item.ingredient_name || "Additive"} is ${(item.formula_percent * 100).toFixed(2)}%, above the 4% additive limit.`);
+    }
+  });
+
+  return {
+    formula_total: formulaTotal,
+    percent_total: percentTotal,
+    total_batch_grams: totalBatchGrams,
+    batch_size_mode: batchSizeMode,
+    batch_total: batchTotal,
+    estimated_yield: estimatedYield,
+    active_ingredient_grams: activeIngredientGrams,
+    additive_limit_percent: 4,
+    warnings,
+    ingredients: normalizedIngredients
+  };
 }
 
 function showToast(message) {
@@ -87,10 +173,12 @@ function recipeCards(recipes) {
         ${statusBadge(recipe)}
       </div>
       <p>${recipe.product_type || "No product type"} ${recipe.flavor ? `• ${recipe.flavor}` : ""}</p>
-      <p>Version ${recipe.current_version || "unpublished"} • Batch ${qty(recipe.batch_size)} ${recipe.batch_unit || ""}</p>
+      <p>Version ${recipe.current_version || "unpublished"} • Batch ${batchInputLabel(recipe)}</p>
+      ${recipe.expected_production_date ? `<p>Production ${recipe.expected_production_date}</p>` : ""}
       <div class="toolbar">
         <button data-open="${recipe.id}">Open</button>
         <button data-duplicate="${recipe.id}">Duplicate</button>
+        <button data-duplicate-new="${recipe.id}">Duplicate and Start New Recipe</button>
       </div>
     </article>
   `).join("")}</div>`;
@@ -133,6 +221,11 @@ function bindRecipeListButtons() {
     showToast("Recipe duplicated.");
     renderEditor(copy.id);
   }));
+  content.querySelectorAll("[data-duplicate-new]").forEach((button) => button.addEventListener("click", async () => {
+    const copy = await api(`/api/recipes/${button.dataset.duplicateNew}/duplicate-new`, { method: "POST", body: {} });
+    showToast("Started a new recipe from the duplicate.");
+    renderEditor(copy.id);
+  }));
 }
 
 function blankRecipe() {
@@ -142,55 +235,66 @@ function blankRecipe() {
     flavor: "",
     status: "Draft",
     batch_size: 0,
+    batch_size_mode: "grams",
     batch_unit: "grams",
     unit_weight: 0,
     unit_weight_unit: "grams",
     target_mg_per_unit: 0,
     potency_percent: 0,
+    expected_production_date: "",
+    copy_lock_formula: false,
     notes: [],
     ingredients: [],
     steps: []
   };
 }
 
-async function renderEditor(id, recipe = null) {
+async function renderEditor(id, recipe = null, mode = null) {
   state.view = "editor";
   await loadIngredientsMaster();
   state.currentRecipe = recipe || (id ? await api(`/api/recipes/${id}`) : blankRecipe());
+  state.editorMode = mode || (state.currentRecipe.status === "Published" ? "published-view" : "draft");
+  state.currentRecipe.calculations = state.currentRecipe.calculations || calculateClientRecipe(state.currentRecipe);
   const r = state.currentRecipe;
-  setPage(r.name, "Edit draft fields, recalculate batch quantities, and publish locked version records.");
+  const publishedView = state.editorMode === "published-view";
+  const publishedEdit = state.editorMode === "published-edit";
+  const formulaLocked = publishedEdit || Boolean(r.copy_lock_formula);
+  setPage(r.name, publishedView ? "Published recipe card is locked. Select Edit to change allowed production fields." : "Edit recipe fields and calculated batch quantities.");
   content.innerHTML = `
     <section class="section">
       <div class="section-header">
         <div>${statusBadge(r)}</div>
         <div class="toolbar">
-          <button id="saveRecipe" class="primary">Save Draft</button>
-          ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
+          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : '<button id="saveRecipe" class="primary">Save Draft</button>'}
+          ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
+          ${r.id && !publishedView ? '<button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
         </div>
       </div>
       <div class="grid">
-        ${field("name", "Recipe name", r.name)}
-        ${field("product_type", "Product type", r.product_type)}
-        ${field("flavor", "Flavor", r.flavor)}
-        ${field("batch_size", "Batch size", r.batch_size, "Total production batch size used for calculated ingredient quantities.", "number")}
-        ${field("batch_unit", "Unit type", r.batch_unit)}
-        ${field("unit_weight", "Weight per unit", r.unit_weight, "Used to estimate yield and active ingredient requirements.", "number")}
-        ${field("unit_weight_unit", "Weight unit", r.unit_weight_unit)}
-        ${field("target_mg_per_unit", "Target active mg per unit", r.target_mg_per_unit, "Desired active dose in each stick, gummy, or piece.", "number")}
-        ${field("potency_percent", "Active concentration / potency %", r.potency_percent, "Enter 81.2 for 81.2%, or 0.812 if copied from a spreadsheet.", "number")}
+        ${field("name", "Recipe name", r.name, "", "text", publishedView || publishedEdit)}
+        ${field("product_type", "Product type", r.product_type, "", "text", publishedView || publishedEdit)}
+        ${field("flavor", "Flavor", r.flavor, "", "text", publishedView || publishedEdit)}
+        ${field("expected_production_date", "Expected production date", r.expected_production_date, "Required before publishing. Published cards appear on this calendar date.", "date", publishedView || publishedEdit)}
+        ${selectField("batch_size_mode", "Batch size means", r.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]], "Choose whether batch size is a total gram batch or a number of finished units.", publishedView || publishedEdit)}
+        ${field("batch_size", r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", publishedView)}
+        ${field("unit_weight", "Weight per unit", r.unit_weight, r.batch_size_mode === "units" ? "Required to convert units to total batch grams." : "Reference value only for estimating yield from total grams.", "number", publishedView)}
+        ${field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", publishedView || publishedEdit)}
+        ${field("target_mg_per_unit", "Target active mg per unit", r.target_mg_per_unit, "Desired active dose in each stick, gummy, or piece.", "number", publishedView)}
+        ${field("potency_percent", "Active concentration / potency %", r.potency_percent, "Enter 81.2 for 81.2%, or 0.812 if copied from a spreadsheet.", "number", publishedView)}
       </div>
+      ${r.copy_lock_formula ? '<div class="warning">This is a locked formula copy. Formula quantity, formula percent, and batch quantity are locked and will publish with the copied version number.</div>' : ""}
     </section>
     ${renderMetrics(r)}
     <section class="section">
       <div class="section-header">
         <h2>Ingredients</h2>
-        <button id="addIngredient">Add Ingredient</button>
+        ${publishedView || publishedEdit || r.copy_lock_formula ? "" : '<button id="addIngredient">Add Ingredient</button>'}
       </div>
       <div class="table-wrap">
         <table class="ingredient-table">
           <thead>
             <tr>
-              <th>Name</th><th>Description / INCI</th><th>Formula qty</th><th>Formula %</th><th>Batch qty</th><th>Unit</th><th>Phase</th><th>Vendor</th><th>Lot #</th><th>Cost/unit</th><th>Calc cost</th><th>Notes</th><th></th>
+              <th>Name</th><th>Formula qty</th><th>Formula %</th><th>Unit</th><th>Vendor</th><th>Notes</th><th class="batch-heading">Batch qty to use</th><th></th>
             </tr>
           </thead>
           <tbody id="ingredientRows"></tbody>
@@ -211,7 +315,7 @@ async function renderEditor(id, recipe = null) {
     </section>
     <section class="section no-print">
       <div class="toolbar">
-        <button id="recalculate">Recalculate</button>
+        ${publishedView ? "" : '<button id="recalculate">Recalculate</button>'}
         ${r.current_version ? '<button id="previewCard">Preview Final Card</button>' : ""}
       </div>
     </section>
@@ -221,30 +325,55 @@ async function renderEditor(id, recipe = null) {
   bindEditor();
 }
 
-function field(name, label, value, help = "", type = "text") {
-  return `<label>${label}${help ? `<span class="helper">${help}</span>` : ""}<input name="${name}" type="${type}" step="any" value="${escapeHtml(value ?? "")}"></label>`;
+function field(name, label, value, help = "", type = "text", locked = false) {
+  return `<label>${label}${help ? `<span class="helper">${help}</span>` : ""}<input name="${name}" type="${type}" step="any" value="${escapeHtml(value ?? "")}" ${locked ? "readonly" : ""}></label>`;
+}
+
+function selectField(name, label, value, options, help = "", locked = false) {
+  return `<label>${label}${help ? `<span class="helper">${help}</span>` : ""}<select name="${name}" ${locked ? "disabled" : ""}>${options.map(([optionValue, text]) => `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
 }
 
 function renderMetrics(recipe) {
   const c = recipe.calculations || {};
   return `
-    <section class="section">
+    <section class="section" id="calcSummary">
       <div class="grid">
         <div class="metric"><strong>Formula total</strong><p>${qty(c.formula_total)} base units</p></div>
         <div class="metric"><strong>Percent total</strong><p>${pct(c.percent_total)}</p></div>
-        <div class="metric"><strong>Batch total</strong><p>${qty(c.batch_total)} ${recipe.batch_unit || ""}</p></div>
+        <div class="metric"><strong>Total batch size</strong><p>${qty(c.total_batch_grams)} grams</p></div>
+        <div class="metric"><strong>Batch total</strong><p>${qty(c.batch_total)} grams</p></div>
         <div class="metric"><strong>Estimated yield</strong><p>${qty(c.estimated_yield)} units</p></div>
-        <div class="metric"><strong>Cost total</strong><p>${money(c.cost_total)}</p></div>
-        <div class="metric"><strong>Cost per unit</strong><p>${money(c.cost_per_unit)}</p></div>
       </div>
+      <div class="helper">Active ingredient needed: ${qty(c.active_ingredient_grams)} grams</div>
       ${(c.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
     </section>
   `;
 }
 
+function refreshCalculationDisplay(updateRows = false) {
+  if (!state.currentRecipe) return;
+  state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+  state.currentRecipe.ingredients = state.currentRecipe.calculations.ingredients;
+  const summary = content.querySelector("#calcSummary");
+  if (summary) summary.outerHTML = renderMetrics(state.currentRecipe);
+
+  if (!updateRows) return;
+  content.querySelectorAll("#ingredientRows tr").forEach((row) => {
+    const index = Number(row.dataset.index);
+    const item = state.currentRecipe.ingredients[index];
+    if (!item) return;
+    const percent = row.querySelector('[data-field="formula_percent"]');
+    const batch = row.querySelector('[data-field="batch_qty"]');
+    if (percent && document.activeElement !== percent) percent.value = item.formula_percent;
+    if (batch) batch.value = item.batch_qty;
+  });
+}
+
 function renderIngredientRows() {
   const tbody = content.querySelector("#ingredientRows");
   tbody.innerHTML = "";
+  const readOnlyRecipe = state.editorMode === "published-view";
+  const formulaLocked = state.editorMode === "published-edit" || Boolean(state.currentRecipe.copy_lock_formula);
   (state.currentRecipe.ingredients || []).forEach((item, index) => {
     const row = document.querySelector("#recipeRowTemplate").content.firstElementChild.cloneNode(true);
     row.dataset.index = index;
@@ -260,20 +389,57 @@ function renderIngredientRows() {
           input.insertAdjacentHTML("afterend", `<div class="match-alert">Review match. Imported as "${escapeHtml(item.original_ingredient_name || "")}".</div>`);
         }
       }
+      if (readOnlyRecipe || ["batch_qty"].includes(input.dataset.field) || (formulaLocked && ["formula_qty", "formula_percent"].includes(input.dataset.field))) {
+        input.readOnly = true;
+      }
+      if (readOnlyRecipe && input.dataset.field !== "batch_qty") input.readOnly = true;
       input.addEventListener("input", () => {
         state.currentRecipe.ingredients[index][input.dataset.field] = input.type === "number" ? Number(input.value) : input.value;
         if (input.dataset.field === "ingredient_name") {
           state.currentRecipe.ingredients[index].match_status = "matched";
           state.currentRecipe.ingredients[index].match_confidence = 1;
         }
+        mirrorFormulaField(index, input.dataset.field);
+        refreshCalculationDisplay(["formula_qty", "formula_percent"].includes(input.dataset.field));
       });
     });
-    row.querySelector("[data-action='removeIngredient']").addEventListener("click", () => {
-      state.currentRecipe.ingredients.splice(index, 1);
-      renderIngredientRows();
-    });
+    const removeButton = row.querySelector("[data-action='removeIngredient']");
+    if (readOnlyRecipe || formulaLocked) {
+      removeButton.remove();
+    } else {
+      removeButton.addEventListener("click", () => {
+        state.currentRecipe.ingredients.splice(index, 1);
+        renderIngredientRows();
+        refreshCalculationDisplay(true);
+      });
+    }
     tbody.appendChild(row);
   });
+}
+
+function mirrorFormulaField(index, changedField) {
+  if (!["formula_qty", "formula_percent"].includes(changedField)) return;
+  const ingredient = state.currentRecipe.ingredients[index];
+  if (!ingredient) return;
+  const otherQtyTotal = state.currentRecipe.ingredients.reduce((sum, item, itemIndex) => (
+    itemIndex === index ? sum : sum + numeric(item.formula_qty)
+  ), 0);
+  const currentTotal = otherQtyTotal + numeric(ingredient.formula_qty);
+
+  if (changedField === "formula_qty") {
+    ingredient.formula_percent = currentTotal > 0 ? numeric(ingredient.formula_qty) / currentTotal : 0;
+    return;
+  }
+
+  const percent = normalizePercentInput(ingredient.formula_percent);
+  ingredient.formula_percent = percent;
+  if (percent >= 1) {
+    ingredient.formula_qty = otherQtyTotal > 0 ? otherQtyTotal : numeric(state.currentRecipe.batch_size);
+  } else if (otherQtyTotal > 0) {
+    ingredient.formula_qty = (percent * otherQtyTotal) / (1 - percent);
+  } else {
+    ingredient.formula_qty = percent * numeric(state.currentRecipe.batch_size);
+  }
 }
 
 function renderStepRows() {
@@ -310,22 +476,45 @@ function collectRecipe() {
   content.querySelectorAll("[name]").forEach((input) => {
     state.currentRecipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
   });
+  state.currentRecipe.batch_unit = "grams";
   state.currentRecipe.notes = content.querySelector("#notesField").value.split("\n").map((line) => line.trim()).filter(Boolean);
   state.currentRecipe.ingredients = (state.currentRecipe.ingredients || []).map((item, index) => ({ ...item, sort_order: index + 1 }));
   state.currentRecipe.steps = (state.currentRecipe.steps || []).map((step, index) => ({ ...step, sort_order: index + 1 }));
+  state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+  state.currentRecipe.ingredients = state.currentRecipe.calculations.ingredients;
   return state.currentRecipe;
 }
 
 function bindEditor() {
-  content.querySelector("#addIngredient").addEventListener("click", () => {
+  content.querySelectorAll("[name]").forEach((input) => {
+    const updateHeader = () => {
+      state.currentRecipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
+      state.currentRecipe.batch_unit = "grams";
+      refreshCalculationDisplay(true);
+    };
+    input.addEventListener("input", updateHeader);
+    input.addEventListener("change", updateHeader);
+  });
+
+  content.querySelector("#editPublished")?.addEventListener("click", () => {
+    renderEditor(state.currentRecipe.id, state.currentRecipe, "published-edit");
+  });
+  content.querySelector("#deleteRecipe")?.addEventListener("click", async () => {
+    if (!window.confirm("Delete this recipe and its published versions?")) return;
+    await api(`/api/recipes/${state.currentRecipe.id}`, { method: "DELETE" });
+    showToast("Recipe deleted.");
+    renderDashboard();
+  });
+  content.querySelector("#addIngredient")?.addEventListener("click", () => {
     state.currentRecipe.ingredients.push({ ingredient_name: "", unit: "grams", formula_qty: 0, formula_percent: 0, batch_qty: 0 });
     renderIngredientRows();
+    refreshCalculationDisplay(true);
   });
   content.querySelector("#addStep").addEventListener("click", () => {
     state.currentRecipe.steps.push({ instruction_text: "" });
     renderStepRows();
   });
-  content.querySelector("#saveRecipe").addEventListener("click", async () => {
+  content.querySelector("#saveRecipe")?.addEventListener("click", async () => {
     const payload = collectRecipe();
     const saved = payload.id
       ? await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload })
@@ -333,10 +522,15 @@ function bindEditor() {
     showToast("Draft saved.");
     renderEditor(saved.id);
   });
-  content.querySelector("#recalculate").addEventListener("click", async () => {
+  content.querySelector("#recalculate")?.addEventListener("click", async () => {
     const payload = collectRecipe();
-    if (!payload.id) return renderEditor(null, payload);
+    if (!payload.id) {
+      refreshCalculationDisplay(true);
+      showToast("Recipe recalculated.");
+      return;
+    }
     const saved = await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
+    showToast("Recipe recalculated.");
     renderEditor(saved.id);
   });
   content.querySelector("#duplicateRecipe")?.addEventListener("click", async () => {
@@ -344,8 +538,17 @@ function bindEditor() {
     showToast("Recipe duplicated.");
     renderEditor(copy.id);
   });
+  content.querySelector("#duplicateNewRecipe")?.addEventListener("click", async () => {
+    const copy = await api(`/api/recipes/${state.currentRecipe.id}/duplicate-new`, { method: "POST", body: {} });
+    showToast("Started a new recipe from duplicate.");
+    renderEditor(copy.id);
+  });
   content.querySelector("#publishRecipe")?.addEventListener("click", async () => {
     const payload = collectRecipe();
+    if (!payload.expected_production_date) {
+      showToast("Expected production date is required before publishing.");
+      return;
+    }
     const saved = await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
     const publishedBy = window.prompt("Published by", "Production") || "Production";
     const published = await api(`/api/recipes/${saved.id}/publish`, { method: "POST", body: { published_by: publishedBy } });
@@ -402,6 +605,8 @@ function renderImportPreview() {
             ${importField(index, "name", "Recipe name", recipe.name)}
             ${importField(index, "product_type", "Product type", recipe.product_type)}
             ${importField(index, "flavor", "Flavor", recipe.flavor)}
+            ${importField(index, "expected_production_date", "Expected production date", recipe.expected_production_date || "", "date")}
+            ${importSelectField(index, "batch_size_mode", "Batch size means", recipe.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]])}
             ${importField(index, "batch_size", "Batch size", recipe.batch_size, "number")}
             ${importField(index, "unit_weight", "Weight per unit", recipe.unit_weight, "number")}
             ${importField(index, "target_mg_per_unit", "Target mg/unit", recipe.target_mg_per_unit, "number")}
@@ -411,7 +616,7 @@ function renderImportPreview() {
             <summary>${recipe.ingredients.length} ingredients, ${recipe.steps.length} SOP steps</summary>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Name</th><th>Formula %</th><th>Batch qty</th><th>Unit</th><th>Phase</th><th>Vendor</th></tr></thead>
+                <thead><tr><th>Name</th><th>Formula %</th><th>Batch qty</th><th>Unit</th><th>Vendor</th></tr></thead>
                 <tbody>
                   ${recipe.ingredients.map((item, ingredientIndex) => `
                     <tr class="${item.match_status === "review" ? "match-review" : ""}">
@@ -422,7 +627,6 @@ function renderImportPreview() {
                       <td><input type="number" step="any" data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="formula_percent" value="${item.formula_percent || 0}"></td>
                       <td><input type="number" step="any" data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="batch_qty" value="${item.batch_qty || 0}"></td>
                       <td><input data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="unit" value="${escapeHtml(item.unit || "")}"></td>
-                      <td><input data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="phase" value="${escapeHtml(item.phase || "")}"></td>
                       <td><input data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="vendor" value="${escapeHtml(item.vendor || "")}"></td>
                     </tr>
                   `).join("")}
@@ -447,6 +651,10 @@ function renderImportPreview() {
   area.querySelectorAll("[data-import-field]").forEach((input) => input.addEventListener("input", () => {
     const recipe = preview.recipes[Number(input.dataset.index)];
     recipe[input.dataset.importField] = input.type === "number" ? Number(input.value) : input.value;
+  }));
+  area.querySelectorAll("[data-import-select]").forEach((select) => select.addEventListener("change", () => {
+    const recipe = preview.recipes[Number(select.dataset.index)];
+    recipe[select.dataset.importSelect] = select.value;
   }));
   area.querySelectorAll("[data-import-notes]").forEach((textarea) => textarea.addEventListener("input", () => {
     preview.recipes[Number(textarea.dataset.importNotes)].notes = textarea.value.split("\n").filter(Boolean);
@@ -478,9 +686,13 @@ function importField(index, name, label, value, type = "text") {
   return `<label>${label}<input data-index="${index}" data-import-field="${name}" type="${type}" step="any" value="${escapeHtml(value ?? "")}"></label>`;
 }
 
+function importSelectField(index, name, label, value, options) {
+  return `<label>${label}<select data-index="${index}" data-import-select="${name}">${options.map(([optionValue, text]) => `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
+}
+
 async function renderCards(recipeId = null) {
   state.view = "cards";
-  setPage("Published Cards", "Locked published recipe cards ready for browser viewing and printing.");
+  setPage("Published Calendar", "Select a production date to open the published recipe focus card.");
   if (recipeId) {
     const versions = await api(`/api/recipes/${recipeId}/versions`);
     if (!versions.length) {
@@ -490,8 +702,58 @@ async function renderCards(recipeId = null) {
     return renderVersionCard(versions[0].id);
   }
   await loadRecipes({ status: "Published" });
-  content.innerHTML = `<section class="section">${recipeCards(state.recipes)}</section>`;
-  bindRecipeListButtons();
+  renderPublishedCalendar(monthKey(state.recipes[0]?.expected_production_date || isoToday()));
+}
+
+function renderPublishedCalendar(activeMonth) {
+  const [year, month] = activeMonth.split("-").map(Number);
+  const first = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const offset = first.getDay();
+  const recipesByDate = new Map();
+  state.recipes.forEach((recipe) => {
+    const date = recipe.expected_production_date || recipe.updated_at?.slice(0, 10) || isoToday();
+    if (monthKey(date) !== activeMonth) return;
+    if (!recipesByDate.has(date)) recipesByDate.set(date, []);
+    recipesByDate.get(date).push(recipe);
+  });
+  const prevMonth = month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, "0")}`;
+  const nextMonth = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, "0")}`;
+  const cells = [];
+  for (let i = 0; i < offset; i += 1) cells.push('<div class="calendar-cell muted-cell"></div>');
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${activeMonth}-${String(day).padStart(2, "0")}`;
+    const recipes = recipesByDate.get(date) || [];
+    cells.push(`
+      <div class="calendar-cell">
+        <div class="calendar-day">${day}</div>
+        ${recipes.map((recipe) => `
+          <button class="calendar-recipe" data-card-recipe="${recipe.id}">
+            <strong>${recipe.name}</strong>
+            <span>${recipe.current_version || ""}</span>
+          </button>
+        `).join("")}
+      </div>
+    `);
+  }
+  content.innerHTML = `
+    <section class="section">
+      <div class="section-header">
+        <button id="prevMonth">‹ ${monthLabel(prevMonth)}</button>
+        <h2>${monthLabel(activeMonth)}</h2>
+        <button id="nextMonth">${monthLabel(nextMonth)} ›</button>
+      </div>
+      <div class="calendar-weekdays">
+        ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div>${day}</div>`).join("")}
+      </div>
+      <div class="calendar-grid">${cells.join("")}</div>
+    </section>
+  `;
+  content.querySelector("#prevMonth").addEventListener("click", () => renderPublishedCalendar(prevMonth));
+  content.querySelector("#nextMonth").addEventListener("click", () => renderPublishedCalendar(nextMonth));
+  content.querySelectorAll("[data-card-recipe]").forEach((button) => {
+    button.addEventListener("click", () => renderCards(button.dataset.cardRecipe));
+  });
 }
 
 async function renderVersionCard(versionId) {
@@ -513,17 +775,19 @@ async function renderVersionCard(versionId) {
       </header>
       <section class="grid">
         <div><strong>Product / Flavor</strong><p>${recipe.product_type || ""} ${recipe.flavor || ""}</p></div>
-        <div><strong>Batch size</strong><p>${qty(recipe.batch_size)} ${recipe.batch_unit || ""}</p></div>
+        <div><strong>Batch size input</strong><p>${batchInputLabel(recipe)}</p></div>
+        <div><strong>Total batch grams</strong><p>${qty(calculations.total_batch_grams)} grams</p></div>
         <div><strong>Yield</strong><p>${qty(calculations.estimated_yield)} units</p></div>
+        <div><strong>Production date</strong><p>${recipe.expected_production_date || ""}</p></div>
         <div><strong>Published by</strong><p>${version.published_by || ""}</p></div>
       </section>
       <h2>Ingredients</h2>
       <table>
-        <thead><tr><th>Ingredient</th><th>Percent</th><th>Batch Qty</th><th>Unit</th><th>Vendor / Lot</th></tr></thead>
-        <tbody>${version.ingredients.map((item) => `<tr><td>${item.ingredient_name}</td><td>${pct(item.formula_percent)}</td><td>${qty(item.batch_qty)}</td><td>${item.unit || ""}</td><td>${item.vendor || ""} ${item.lot_number || ""}</td></tr>`).join("")}</tbody>
+        <thead><tr><th>Ingredient</th><th>Formula Qty</th><th>Formula %</th><th>Unit</th><th>Batch Qty To Use</th></tr></thead>
+        <tbody>${version.ingredients.map((item) => `<tr><td>${item.ingredient_name}</td><td>${qty(item.formula_qty)}</td><td>${pct(item.formula_percent)}</td><td>${item.unit || ""}</td><td class="batch-qty-display">${qty(item.batch_qty)}</td></tr>`).join("")}</tbody>
       </table>
       <h2>Calculation Summary</h2>
-      <p>Formula total: ${qty(calculations.formula_total)} • Percent total: ${pct(calculations.percent_total)} • Batch total: ${qty(calculations.batch_total)} • Cost/unit: ${money(calculations.cost_per_unit)}</p>
+      <p>Formula total: ${qty(calculations.formula_total)} • Percent total: ${pct(calculations.percent_total)} • Batch total: ${qty(calculations.batch_total)}</p>
       ${(calculations.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
       <h2>SOP / Process Instructions</h2>
       <ol>${version.steps.map((step) => `<li>${step.instruction_text}</li>`).join("")}</ol>

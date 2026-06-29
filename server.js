@@ -12,7 +12,9 @@ const {
   createRecipe,
   updateRecipe,
   publishRecipe,
+  duplicateRecipe,
   archiveRecipe,
+  deleteRecipe,
   listVersions,
   getVersion,
   createImportJob,
@@ -64,16 +66,21 @@ app.patch("/api/recipes/:id/archive", asyncRoute(async (req, res) => {
   return res.json(recipe);
 }));
 
+app.delete("/api/recipes/:id", asyncRoute(async (req, res) => {
+  const deleted = await deleteRecipe(req.params.id);
+  if (!deleted) return res.status(404).json({ error: "Recipe not found" });
+  return res.json({ ok: true });
+}));
+
 app.post("/api/recipes/:id/duplicate", asyncRoute(async (req, res) => {
-  const recipe = await getRecipe(req.params.id);
-  if (!recipe) return res.status(404).json({ error: "Recipe not found" });
-  const copy = await createRecipe({
-    ...recipe,
-    name: `${recipe.name} Copy`,
-    status: "Draft",
-    current_version: "",
-    has_unpublished_changes: false
-  });
+  const copy = await duplicateRecipe(req.params.id, { startNewRecipe: false });
+  if (!copy) return res.status(404).json({ error: "Recipe not found" });
+  return res.status(201).json(copy);
+}));
+
+app.post("/api/recipes/:id/duplicate-new", asyncRoute(async (req, res) => {
+  const copy = await duplicateRecipe(req.params.id, { startNewRecipe: true });
+  if (!copy) return res.status(404).json({ error: "Recipe not found" });
   return res.status(201).json(copy);
 }));
 
@@ -140,7 +147,7 @@ app.put("/api/settings", asyncRoute(async (req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: err.message || "Unexpected server error" });
+  res.status(err.statusCode || 500).json({ error: err.message || "Unexpected server error" });
 });
 
 async function start() {

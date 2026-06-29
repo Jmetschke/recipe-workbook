@@ -34,17 +34,12 @@
     <template id="recipeRowTemplate">
       <tr>
         <td><input data-field="ingredient_name"></td>
-        <td><input data-field="description"></td>
         <td><input type="number" step="any" data-field="formula_qty"></td>
         <td><input type="number" step="any" data-field="formula_percent"></td>
-        <td><input type="number" step="any" data-field="batch_qty" class="calculated" readonly></td>
         <td><input data-field="unit"></td>
-        <td><input data-field="phase"></td>
         <td><input data-field="vendor"></td>
-        <td><input data-field="lot_number"></td>
-        <td><input type="number" step="any" data-field="cost_per_unit"></td>
-        <td><input type="number" step="any" data-field="calculated_cost" class="calculated" readonly></td>
         <td><input data-field="notes"></td>
+        <td><input type="number" step="any" data-field="batch_qty" class="batch-qty-field calculated" readonly></td>
         <td><button class="icon danger" data-action="removeIngredient">×</button></td>
       </tr>
     </template>
