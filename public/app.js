@@ -167,7 +167,22 @@ async function loadIngredientsMaster() {
 }
 
 function ingredientOptionsMarkup() {
-  return `<datalist id="ingredientOptions">${state.ingredientsMaster.map((item) => `<option value="${escapeHtml(item.ingredient_name)}"></option>`).join("")}</datalist>`;
+  return `<datalist id="ingredientOptions">${state.ingredientsMaster.map((item) => {
+    const labelParts = [item.ingredient_type, item.default_vendor, item.source].filter(Boolean);
+    const label = labelParts.length ? ` label="${escapeHtml(labelParts.join(" - "))}"` : "";
+    return `<option value="${escapeHtml(item.ingredient_name)}"${label}></option>`;
+  }).join("")}</datalist>`;
+}
+
+function masterIngredientByName(name) {
+  const normalized = String(name || "").trim().toLowerCase();
+  return state.ingredientsMaster.find((item) => item.ingredient_name.toLowerCase() === normalized);
+}
+
+function typeOptions(value = "") {
+  return ["", "SB", "Hijnx", "Topicals"].map((option) => (
+    `<option value="${option}" ${option === value ? "selected" : ""}>${option}</option>`
+  )).join("");
 }
 
 function statusBadge(recipe) {
@@ -306,7 +321,7 @@ async function renderEditor(id, recipe = null, mode = null) {
         <table class="ingredient-table">
           <thead>
             <tr>
-              <th>Name</th><th>Formula qty</th><th>Formula %</th><th>Unit</th><th>Vendor</th><th>Notes</th><th class="batch-heading">Batch qty to use</th><th></th>
+              <th>Type</th><th>Name</th><th>Formula qty</th><th>Formula %</th><th>Unit</th><th>Vendor</th><th>Notes</th><th class="batch-heading">Batch qty to use</th><th></th>
             </tr>
           </thead>
           <tbody id="ingredientRows"></tbody>
@@ -487,6 +502,7 @@ function bindActiveAdditiveTool() {
     }
     const newIndex = state.currentRecipe.ingredients.push({
       ingredient_name: name,
+      ingredient_type: masterIngredientByName(name)?.ingredient_type || "",
       unit: "grams",
       formula_qty: 0,
       formula_percent: 0,
@@ -518,7 +534,7 @@ function renderIngredientRows() {
     const row = document.querySelector("#recipeRowTemplate").content.firstElementChild.cloneNode(true);
     row.dataset.index = index;
     if (item.match_status === "review") row.classList.add("match-review");
-    row.querySelectorAll("input").forEach((input) => {
+    row.querySelectorAll("input, select").forEach((input) => {
       input.value = item[input.dataset.field] ?? "";
       if (input.dataset.field === "ingredient_name") {
         input.setAttribute("list", "ingredientOptions");
@@ -530,18 +546,29 @@ function renderIngredientRows() {
         }
       }
       if (readOnlyRecipe || ["batch_qty"].includes(input.dataset.field) || (formulaLocked && ["formula_qty", "formula_percent"].includes(input.dataset.field))) {
-        input.readOnly = true;
+        if (input.tagName === "SELECT") input.disabled = true;
+        else input.readOnly = true;
       }
-      if (readOnlyRecipe && input.dataset.field !== "batch_qty") input.readOnly = true;
-      input.addEventListener("input", () => {
+      if (readOnlyRecipe && input.dataset.field !== "batch_qty") {
+        if (input.tagName === "SELECT") input.disabled = true;
+        else input.readOnly = true;
+      }
+      const updateIngredientField = () => {
         state.currentRecipe.ingredients[index][input.dataset.field] = input.type === "number" ? Number(input.value) : input.value;
         if (input.dataset.field === "ingredient_name") {
+          const master = masterIngredientByName(input.value);
+          if (master?.ingredient_type) {
+            state.currentRecipe.ingredients[index].ingredient_type = master.ingredient_type;
+            row.querySelector('[data-field="ingredient_type"]').value = master.ingredient_type;
+          }
           state.currentRecipe.ingredients[index].match_status = "matched";
           state.currentRecipe.ingredients[index].match_confidence = 1;
         }
         mirrorFormulaField(index, input.dataset.field);
         refreshCalculationDisplay(["formula_qty", "formula_percent"].includes(input.dataset.field));
-      });
+      };
+      input.addEventListener("input", updateIngredientField);
+      input.addEventListener("change", updateIngredientField);
     });
     const removeButton = row.querySelector("[data-action='removeIngredient']");
     if (readOnlyRecipe || formulaLocked) {
@@ -648,7 +675,7 @@ function bindEditor() {
     renderDashboard();
   });
   content.querySelector("#addIngredient")?.addEventListener("click", () => {
-    state.currentRecipe.ingredients.push({ ingredient_name: "", unit: "grams", formula_qty: 0, formula_percent: 0, batch_qty: 0 });
+    state.currentRecipe.ingredients.push({ ingredient_type: "", ingredient_name: "", unit: "grams", formula_qty: 0, formula_percent: 0, batch_qty: 0 });
     renderIngredientRows();
     refreshCalculationDisplay(true);
   });
@@ -758,10 +785,11 @@ function renderImportPreview() {
             <summary>${recipe.ingredients.length} ingredients, ${recipe.steps.length} SOP steps</summary>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Name</th><th>Formula %</th><th>Batch qty</th><th>Unit</th><th>Vendor</th></tr></thead>
+                <thead><tr><th>Type</th><th>Name</th><th>Formula %</th><th>Batch qty</th><th>Unit</th><th>Vendor</th></tr></thead>
                 <tbody>
                   ${recipe.ingredients.map((item, ingredientIndex) => `
                     <tr class="${item.match_status === "review" ? "match-review" : ""}">
+                      <td><select data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="ingredient_type">${typeOptions(item.ingredient_type || "")}</select></td>
                       <td>
                         <input list="ingredientOptions" data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="ingredient_name" value="${escapeHtml(item.ingredient_name || "")}">
                         ${item.match_status === "review" ? `<div class="match-alert">Review match. Imported as "${escapeHtml(item.original_ingredient_name || "")}".</div>` : ""}
@@ -801,17 +829,27 @@ function renderImportPreview() {
   area.querySelectorAll("[data-import-notes]").forEach((textarea) => textarea.addEventListener("input", () => {
     preview.recipes[Number(textarea.dataset.importNotes)].notes = textarea.value.split("\n").filter(Boolean);
   }));
-  area.querySelectorAll("[data-import-ingredient]").forEach((input) => input.addEventListener("input", () => {
+  area.querySelectorAll("[data-import-ingredient]").forEach((input) => {
+    const updateImportIngredient = () => {
     const recipe = preview.recipes[Number(input.dataset.importIngredient)];
     const ingredient = recipe.ingredients[Number(input.dataset.ingredientIndex)];
     ingredient[input.dataset.ingredientField] = input.type === "number" ? Number(input.value) : input.value;
     if (input.dataset.ingredientField === "ingredient_name") {
+      const master = masterIngredientByName(input.value);
+      if (master?.ingredient_type) {
+        ingredient.ingredient_type = master.ingredient_type;
+        const typeSelect = input.closest("tr")?.querySelector('[data-ingredient-field="ingredient_type"]');
+        if (typeSelect) typeSelect.value = master.ingredient_type;
+      }
       ingredient.match_status = "matched";
       ingredient.match_confidence = 1;
       input.closest("tr")?.classList.remove("match-review");
       input.parentElement.querySelector(".match-alert")?.remove();
     }
-  }));
+    };
+    input.addEventListener("input", updateImportIngredient);
+    input.addEventListener("change", updateImportIngredient);
+  });
   area.querySelectorAll("[data-import-step]").forEach((textarea) => textarea.addEventListener("input", () => {
     const recipe = preview.recipes[Number(textarea.dataset.importStep)];
     recipe.steps[Number(textarea.dataset.stepIndex)].instruction_text = textarea.value;
@@ -925,8 +963,8 @@ async function renderVersionCard(versionId) {
       </section>
       <h2>Ingredients</h2>
       <table>
-        <thead><tr><th>Ingredient</th><th>Formula Qty</th><th>Formula %</th><th>Unit</th><th>Batch Qty To Use</th></tr></thead>
-        <tbody>${version.ingredients.map((item) => `<tr><td>${item.ingredient_name}</td><td>${qty(item.formula_qty)}</td><td>${pct(item.formula_percent)}</td><td>${item.unit || ""}</td><td class="batch-qty-display">${qty(item.batch_qty)}</td></tr>`).join("")}</tbody>
+        <thead><tr><th>Type</th><th>Ingredient</th><th>Formula Qty</th><th>Formula %</th><th>Unit</th><th>Batch Qty To Use</th></tr></thead>
+        <tbody>${version.ingredients.map((item) => `<tr><td>${item.ingredient_type || ""}</td><td>${item.ingredient_name}</td><td>${qty(item.formula_qty)}</td><td>${pct(item.formula_percent)}</td><td>${item.unit || ""}</td><td class="batch-qty-display">${qty(item.batch_qty)}</td></tr>`).join("")}</tbody>
       </table>
       <h2>Calculation Summary</h2>
       <p>Formula total: ${qty(calculations.formula_total)} • Percent total: ${pct(calculations.percent_total)} • Batch total: ${qty(calculations.batch_total)}</p>
@@ -953,8 +991,8 @@ async function renderIngredients() {
     <section class="section">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th><th>Default unit</th><th>Vendor</th><th>Default cost</th><th>Source</th><th>Notes</th></tr></thead>
-          <tbody>${ingredients.map((item) => `<tr><td>${item.ingredient_name}</td><td>${item.description || ""}</td><td>${item.default_unit || ""}</td><td>${item.default_vendor || ""}</td><td>${money(item.default_cost)}</td><td>${item.source || ""}</td><td>${item.notes || ""}</td></tr>`).join("")}</tbody>
+          <thead><tr><th>Name</th><th>Type</th><th>Description</th><th>Default unit</th><th>Vendor</th><th>Default cost</th><th>Source</th><th>Notes</th></tr></thead>
+          <tbody>${ingredients.map((item) => `<tr><td>${item.ingredient_name}</td><td>${item.ingredient_type || ""}</td><td>${item.description || ""}</td><td>${item.default_unit || ""}</td><td>${item.default_vendor || ""}</td><td>${money(item.default_cost)}</td><td>${item.source || ""}</td><td>${item.notes || ""}</td></tr>`).join("")}</tbody>
         </table>
       </div>
     </section>

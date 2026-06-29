@@ -33,6 +33,14 @@
 
     <template id="recipeRowTemplate">
       <tr>
+        <td>
+          <select data-field="ingredient_type">
+            <option value=""></option>
+            <option value="SB">SB</option>
+            <option value="Hijnx">Hijnx</option>
+            <option value="Topicals">Topicals</option>
+          </select>
+        </td>
         <td><input data-field="ingredient_name"></td>
         <td><input type="number" step="any" data-field="formula_qty"></td>
         <td><input type="number" step="any" data-field="formula_percent"></td>

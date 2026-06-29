@@ -128,6 +128,7 @@ app.get("/api/ingredients", asyncRoute(async (req, res) => {
 app.post("/api/ingredients", asyncRoute(async (req, res) => {
   await upsertMasterIngredients([{
     ingredient_name: req.body.ingredient_name,
+    ingredient_type: req.body.ingredient_type,
     description: req.body.description,
     unit: req.body.default_unit,
     vendor: req.body.default_vendor,

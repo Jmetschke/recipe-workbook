@@ -62,6 +62,7 @@ async function migrate() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
       sort_order INTEGER DEFAULT 0,
+      ingredient_type TEXT DEFAULT '',
       ingredient_name TEXT NOT NULL,
       description TEXT DEFAULT '',
       formula_qty REAL DEFAULT 0,
@@ -103,6 +104,7 @@ async function migrate() {
     `CREATE TABLE IF NOT EXISTS ingredients_master (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ingredient_name TEXT NOT NULL UNIQUE,
+      ingredient_type TEXT DEFAULT '',
       description TEXT DEFAULT '',
       default_unit TEXT DEFAULT 'grams',
       default_vendor TEXT DEFAULT '',
@@ -127,6 +129,8 @@ async function migrate() {
   await addColumnIfMissing("recipe_ingredients", "original_ingredient_name", "TEXT DEFAULT ''");
   await addColumnIfMissing("recipe_ingredients", "match_confidence", "REAL DEFAULT 1");
   await addColumnIfMissing("recipe_ingredients", "match_status", "TEXT DEFAULT 'matched'");
+  await addColumnIfMissing("recipe_ingredients", "ingredient_type", "TEXT DEFAULT ''");
+  await addColumnIfMissing("ingredients_master", "ingredient_type", "TEXT DEFAULT ''");
   await addColumnIfMissing("recipes", "expected_production_date", "TEXT DEFAULT ''");
   await addColumnIfMissing("recipes", "batch_size_mode", "TEXT DEFAULT 'grams'");
   await addColumnIfMissing("recipes", "copied_from_recipe_id", "INTEGER");
@@ -203,12 +207,13 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
   for (const [index, item] of ingredients.entries()) {
     await execute(
       `INSERT INTO recipe_ingredients (
-        recipe_id, sort_order, ingredient_name, description, formula_qty, formula_percent, batch_qty, unit,
+        recipe_id, sort_order, ingredient_type, ingredient_name, description, formula_qty, formula_percent, batch_qty, unit,
         phase, vendor, lot_number, cost_per_unit, calculated_cost, notes, original_ingredient_name, match_confidence, match_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         recipeId,
         item.sort_order || index + 1,
+        item.ingredient_type || "",
         item.ingredient_name || "Unnamed ingredient",
         item.description || "",
         item.formula_qty || 0,
@@ -418,14 +423,16 @@ async function markImportJobCreated(importJobId, recipeId) {
 async function upsertMasterIngredients(ingredients = []) {
   for (const item of ingredients.filter((ingredient) => ingredient.ingredient_name)) {
     await execute(
-      `INSERT INTO ingredients_master (ingredient_name, description, default_unit, default_vendor, default_cost, source, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO ingredients_master (ingredient_name, ingredient_type, description, default_unit, default_vendor, default_cost, source, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(ingredient_name) DO UPDATE SET
+        ingredient_type = COALESCE(NULLIF(excluded.ingredient_type, ''), ingredients_master.ingredient_type),
         description = COALESCE(NULLIF(excluded.description, ''), ingredients_master.description),
         default_vendor = COALESCE(NULLIF(excluded.default_vendor, ''), ingredients_master.default_vendor),
         default_cost = CASE WHEN excluded.default_cost > 0 THEN excluded.default_cost ELSE ingredients_master.default_cost END`,
       [
         item.ingredient_name,
+        item.ingredient_type || "",
         item.description || "",
         item.unit || "grams",
         item.vendor || "",
