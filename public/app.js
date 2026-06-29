@@ -168,7 +168,14 @@ async function loadIngredientsMaster() {
 
 function ingredientOptionsMarkup() {
   return `<datalist id="ingredientOptions">${state.ingredientsMaster.map((item) => {
-    const labelParts = [item.ingredient_type, item.default_vendor, item.source].filter(Boolean);
+    const conversion = Number(item.grams_conversion || item.default_grams_conversion || 0);
+    const labelParts = [
+      item.ingredient_type,
+      item.unit_of_measure,
+      conversion > 0 ? `${qty(conversion)}g` : "",
+      item.default_vendor,
+      item.source
+    ].filter(Boolean);
     const label = labelParts.length ? ` label="${escapeHtml(labelParts.join(" - "))}"` : "";
     return `<option value="${escapeHtml(item.ingredient_name)}"${label}></option>`;
   }).join("")}</datalist>`;
@@ -180,9 +187,20 @@ function masterIngredientByName(name) {
 }
 
 function typeOptions(value = "") {
-  return ["", "SB", "Hijnx", "Topicals"].map((option) => (
+  return ["", "SB", "Hijnx", "Hijnx/Topicals", "Topicals"].map((option) => (
     `<option value="${option}" ${option === value ? "selected" : ""}>${option}</option>`
   )).join("");
+}
+
+function applyMasterIngredientDefaults(ingredient, master) {
+  if (!ingredient || !master) return;
+  if (master.ingredient_type) ingredient.ingredient_type = master.ingredient_type;
+  const recipeUnit = master.default_unit && !/\d|pail|bag|box|bottle|jug|bucket|package|gallon|pouch|ct/i.test(master.default_unit)
+    ? master.default_unit
+    : "grams";
+  if (recipeUnit && (!ingredient.unit || ingredient.unit === "grams")) {
+    ingredient.unit = recipeUnit;
+  }
 }
 
 function statusBadge(recipe) {
@@ -500,7 +518,7 @@ function bindActiveAdditiveTool() {
       showToast("Enter an additive ingredient name first.");
       return;
     }
-    const newIndex = state.currentRecipe.ingredients.push({
+    const ingredient = {
       ingredient_name: name,
       ingredient_type: masterIngredientByName(name)?.ingredient_type || "",
       unit: "grams",
@@ -508,7 +526,9 @@ function bindActiveAdditiveTool() {
       formula_percent: 0,
       batch_qty: 0,
       notes: "Active/additive calculated from target dose and potency."
-    }) - 1;
+    };
+    applyMasterIngredientDefaults(ingredient, masterIngredientByName(name));
+    const newIndex = state.currentRecipe.ingredients.push(ingredient) - 1;
     renderIngredientRows();
     refreshCalculationDisplay(true);
     const nextSelect = content.querySelector("#activeIngredientSelect");
@@ -557,9 +577,12 @@ function renderIngredientRows() {
         state.currentRecipe.ingredients[index][input.dataset.field] = input.type === "number" ? Number(input.value) : input.value;
         if (input.dataset.field === "ingredient_name") {
           const master = masterIngredientByName(input.value);
-          if (master?.ingredient_type) {
-            state.currentRecipe.ingredients[index].ingredient_type = master.ingredient_type;
-            row.querySelector('[data-field="ingredient_type"]').value = master.ingredient_type;
+          if (master) {
+            applyMasterIngredientDefaults(state.currentRecipe.ingredients[index], master);
+            const typeSelect = row.querySelector('[data-field="ingredient_type"]');
+            const unitInput = row.querySelector('[data-field="unit"]');
+            if (typeSelect) typeSelect.value = state.currentRecipe.ingredients[index].ingredient_type || "";
+            if (unitInput) unitInput.value = state.currentRecipe.ingredients[index].unit || "";
           }
           state.currentRecipe.ingredients[index].match_status = "matched";
           state.currentRecipe.ingredients[index].match_confidence = 1;
@@ -836,10 +859,12 @@ function renderImportPreview() {
     ingredient[input.dataset.ingredientField] = input.type === "number" ? Number(input.value) : input.value;
     if (input.dataset.ingredientField === "ingredient_name") {
       const master = masterIngredientByName(input.value);
-      if (master?.ingredient_type) {
-        ingredient.ingredient_type = master.ingredient_type;
+      if (master) {
+        applyMasterIngredientDefaults(ingredient, master);
         const typeSelect = input.closest("tr")?.querySelector('[data-ingredient-field="ingredient_type"]');
-        if (typeSelect) typeSelect.value = master.ingredient_type;
+        const unitInput = input.closest("tr")?.querySelector('[data-ingredient-field="unit"]');
+        if (typeSelect) typeSelect.value = ingredient.ingredient_type || "";
+        if (unitInput) unitInput.value = ingredient.unit || "";
       }
       ingredient.match_status = "matched";
       ingredient.match_confidence = 1;
@@ -985,14 +1010,14 @@ async function renderVersionCard(versionId) {
 
 async function renderIngredients() {
   state.view = "ingredients";
-  setPage("Ingredients", "Master ingredient list populated by recipes and editable for defaults.");
+  setPage("Ingredients", "Master ingredient list populated from the ingredient designation spreadsheet and recipes.");
   const ingredients = await api("/api/ingredients");
   content.innerHTML = `
     <section class="section">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Description</th><th>Default unit</th><th>Vendor</th><th>Default cost</th><th>Source</th><th>Notes</th></tr></thead>
-          <tbody>${ingredients.map((item) => `<tr><td>${item.ingredient_name}</td><td>${item.ingredient_type || ""}</td><td>${item.description || ""}</td><td>${item.default_unit || ""}</td><td>${item.default_vendor || ""}</td><td>${money(item.default_cost)}</td><td>${item.source || ""}</td><td>${item.notes || ""}</td></tr>`).join("")}</tbody>
+          <thead><tr><th>Name</th><th>Type</th><th>Inventory unit of measure</th><th>Grams conversion</th><th>Recipe unit</th><th>Source</th><th>Notes</th></tr></thead>
+          <tbody>${ingredients.map((item) => `<tr><td>${escapeHtml(item.ingredient_name)}</td><td>${escapeHtml(item.ingredient_type || "")}</td><td>${escapeHtml(item.unit_of_measure || "")}</td><td>${qty(item.grams_conversion || item.default_grams_conversion || 1)}</td><td>${escapeHtml(item.default_unit || "grams")}</td><td>${escapeHtml(item.source || "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`).join("")}</tbody>
         </table>
       </div>
     </section>

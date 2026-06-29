@@ -2,7 +2,7 @@ const path = require("path");
 const fs = require("fs");
 const { createClient } = require("@libsql/client");
 const { calculateRecipe } = require("./calculations");
-const { INVENTORY_INGREDIENTS } = require("./inventory");
+const { INVENTORY_INGREDIENTS, INGREDIENT_DESIGNATIONS } = require("./inventory");
 
 const tursoUrl = process.env.TURSO_DATABASE_URL;
 const tursoToken = process.env.TURSO_DATABASE_TOKEN;
@@ -109,6 +109,9 @@ async function migrate() {
       default_unit TEXT DEFAULT 'grams',
       default_vendor TEXT DEFAULT '',
       default_cost REAL DEFAULT 0,
+      unit_of_measure TEXT DEFAULT '',
+      grams_conversion REAL DEFAULT 1,
+      default_grams_conversion REAL DEFAULT 1,
       source TEXT DEFAULT '',
       notes TEXT DEFAULT ''
     )`,
@@ -131,6 +134,9 @@ async function migrate() {
   await addColumnIfMissing("recipe_ingredients", "match_status", "TEXT DEFAULT 'matched'");
   await addColumnIfMissing("recipe_ingredients", "ingredient_type", "TEXT DEFAULT ''");
   await addColumnIfMissing("ingredients_master", "ingredient_type", "TEXT DEFAULT ''");
+  await addColumnIfMissing("ingredients_master", "unit_of_measure", "TEXT DEFAULT ''");
+  await addColumnIfMissing("ingredients_master", "grams_conversion", "REAL DEFAULT 1");
+  await addColumnIfMissing("ingredients_master", "default_grams_conversion", "REAL DEFAULT 1");
   await addColumnIfMissing("recipes", "expected_production_date", "TEXT DEFAULT ''");
   await addColumnIfMissing("recipes", "batch_size_mode", "TEXT DEFAULT 'grams'");
   await addColumnIfMissing("recipes", "copied_from_recipe_id", "INTEGER");
@@ -422,22 +428,35 @@ async function markImportJobCreated(importJobId, recipeId) {
 
 async function upsertMasterIngredients(ingredients = []) {
   for (const item of ingredients.filter((ingredient) => ingredient.ingredient_name)) {
+    const gramsConversion = item.grams_conversion || item.gram_conversion || item.default_grams_conversion || 1;
     await execute(
-      `INSERT INTO ingredients_master (ingredient_name, ingredient_type, description, default_unit, default_vendor, default_cost, source, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO ingredients_master (
+        ingredient_name, ingredient_type, description, default_unit, default_vendor, default_cost,
+        unit_of_measure, grams_conversion, default_grams_conversion, source, notes
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(ingredient_name) DO UPDATE SET
         ingredient_type = COALESCE(NULLIF(excluded.ingredient_type, ''), ingredients_master.ingredient_type),
+        default_unit = COALESCE(NULLIF(excluded.default_unit, ''), ingredients_master.default_unit),
         description = COALESCE(NULLIF(excluded.description, ''), ingredients_master.description),
         default_vendor = COALESCE(NULLIF(excluded.default_vendor, ''), ingredients_master.default_vendor),
-        default_cost = CASE WHEN excluded.default_cost > 0 THEN excluded.default_cost ELSE ingredients_master.default_cost END`,
+        default_cost = CASE WHEN excluded.default_cost > 0 THEN excluded.default_cost ELSE ingredients_master.default_cost END,
+        unit_of_measure = COALESCE(NULLIF(excluded.unit_of_measure, ''), ingredients_master.unit_of_measure),
+        grams_conversion = CASE WHEN excluded.grams_conversion > 0 THEN excluded.grams_conversion ELSE ingredients_master.grams_conversion END,
+        default_grams_conversion = CASE WHEN excluded.default_grams_conversion > 0 THEN excluded.default_grams_conversion ELSE ingredients_master.default_grams_conversion END,
+        source = COALESCE(NULLIF(excluded.source, ''), ingredients_master.source),
+        notes = COALESCE(NULLIF(excluded.notes, ''), ingredients_master.notes)`,
       [
         item.ingredient_name,
         item.ingredient_type || "",
         item.description || "",
-        item.unit || "grams",
+        item.default_unit || item.unit || "grams",
         item.vendor || "",
         item.cost_per_unit || 0,
-        "Recipe",
+        item.unit_of_measure || "",
+        gramsConversion,
+        gramsConversion,
+        item.source || "Recipe",
         item.notes || ""
       ]
     );
@@ -445,6 +464,14 @@ async function upsertMasterIngredients(ingredients = []) {
 }
 
 async function seedInventoryIngredients() {
+  await upsertMasterIngredients(INGREDIENT_DESIGNATIONS.map((item) => ({
+    ...item,
+    unit_of_measure: item.default_unit,
+    default_unit: "grams",
+    source: "Designation Sheet",
+    notes: "Seeded from recipe ingredients-2.xlsx"
+  })));
+
   for (const ingredientName of INVENTORY_INGREDIENTS) {
     await execute(
       `INSERT INTO ingredients_master (ingredient_name, default_unit, source, notes)

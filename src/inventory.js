@@ -44,6 +44,9 @@ const INVENTORY_INGREDIENTS = [
   "Pineapple Pectin",
   "Strawberry Pectin",
   "Watermelon Sugar Free Pectin",
+  "Bittermod",
+  "Concentrate - THC RSO",
+  "Concentrate - THC Distillate",
   "Concentrate - CBD Isolate",
   "Concentrate - CBN Isolate",
   "Concentrate - CBG Isolate",
@@ -65,6 +68,78 @@ const INVENTORY_INGREDIENTS = [
   "black pepper",
   "camphor",
   "copaiba"
+];
+
+const INGREDIENT_DESIGNATIONS = [
+  { ingredient_name: "Marshmallow Fluff", ingredient_type: "Hijnx", default_unit: "1.36kg Pail", gram_conversion: 1360 },
+  { ingredient_name: "Chocolate Chips", ingredient_type: "Hijnx", default_unit: "10kg Box", gram_conversion: 10000 },
+  { ingredient_name: "Food Coloring - Purple", ingredient_type: "Hijnx", default_unit: "10oz Bottle", gram_conversion: 283 },
+  { ingredient_name: "Meringue Powder", ingredient_type: "Hijnx", default_unit: "12oz Bag", gram_conversion: 340 },
+  { ingredient_name: "Food Coloring - White", ingredient_type: "Hijnx", default_unit: "12oz Bottle", gram_conversion: 340 },
+  { ingredient_name: "Baby Candy Bits", ingredient_type: "Hijnx", default_unit: "13.6kg Box", gram_conversion: 13600 },
+  { ingredient_name: "Candy Bits", ingredient_type: "Hijnx", default_unit: "13.6kg Box", gram_conversion: 13600 },
+  { ingredient_name: "Sanding Sugar Mixture (M2M)", ingredient_type: "Hijnx", default_unit: "1400g Bag", gram_conversion: 1400 },
+  { ingredient_name: "Sodium Citrate", ingredient_type: "Hijnx", default_unit: "32oz Pouch", gram_conversion: 907 },
+  { ingredient_name: "Citric Acid Solution (M2M)", ingredient_type: "Hijnx", default_unit: "1500g Bottle", gram_conversion: 1500 },
+  { ingredient_name: "Sucralose Liquid", ingredient_type: "Hijnx", default_unit: "16oz Bottle", gram_conversion: 473 },
+  { ingredient_name: "Monkfruit", ingredient_type: "Hijnx", default_unit: "20kg Bag", gram_conversion: 20000 },
+  { ingredient_name: "Malic Acid", ingredient_type: "Hijnx", default_unit: "25lb Bucket", gram_conversion: 11300 },
+  { ingredient_name: "Canola Oil", ingredient_type: "Hijnx", default_unit: "35lb Jug", gram_conversion: 15500 },
+  { ingredient_name: "Chocolate Frosting", ingredient_type: "Hijnx", default_unit: "4.80kg Pail", gram_conversion: 4800 },
+  { ingredient_name: "Sugar Free Candy Bits", ingredient_type: "Hijnx", default_unit: "400oz Package", gram_conversion: 11340 },
+  { ingredient_name: "Powdered Sugar", ingredient_type: "Hijnx", default_unit: "50lb Bag", gram_conversion: 22680 },
+  { ingredient_name: "Citric Acid", ingredient_type: "Hijnx", default_unit: "50lb Bucket", gram_conversion: 22680 },
+  { ingredient_name: "Distilled Water", ingredient_type: "Hijnx", default_unit: "5Gal Jug", gram_conversion: 3520 },
+  { ingredient_name: "Whoppie Cookie", ingredient_type: "Hijnx", default_unit: "810ct Box", gram_conversion: 8627 },
+  { ingredient_name: "Sodium Benzoate", ingredient_type: "Hijnx", default_unit: "8oz Pouch", gram_conversion: 227 },
+  { ingredient_name: "MCT Oil", ingredient_type: "Hijnx", default_unit: "MCT Gallon", gram_conversion: 3520 },
+  { ingredient_name: "Abstrax Triple Citrus", ingredient_type: "Hijnx", default_unit: "Abstrax Gallon", gram_conversion: 3834 },
+  { ingredient_name: "Abstrax Watermelon", ingredient_type: "Hijnx", default_unit: "Abstrax Gallon", gram_conversion: 3834 },
+  { ingredient_name: "Abstrax Blue Razz", ingredient_type: "Hijnx", default_unit: "Abstrax Gallon", gram_conversion: 3834 },
+  { ingredient_name: "Flavor - Peppermint", ingredient_type: "Hijnx", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Flavor - Blue Raspberry", ingredient_type: "Hijnx", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Green Apple Pucks", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Mango Pucks", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Blue Raspberry Pucks", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Watermelon Pucks", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Pineapple Pectin", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Strawberry Pectin", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Watermelon Sugar Free Pectin", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Bittermod", ingredient_type: "Hijnx", default_unit: "Kilogram", gram_conversion: 1000 },
+  { ingredient_name: "Grape Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Mango Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Lemon Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Watermelon Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Lychee Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Strawberry Jam Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Dragon Fruit Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Peach Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Passionfruit Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Cherry Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Crimson Toro (Cranberry/Pomegrante) Abstrax Terps", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Concentrate - THC RSO", ingredient_type: "Hijnx/Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Concentrate - THC Distillate", ingredient_type: "SB", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Concentrate - CBD Isolate", ingredient_type: "Hijnx/Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Concentrate - CBN Isolate", ingredient_type: "Hijnx", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Concentrate - CBG Isolate", ingredient_type: "Hijnx", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "Concentrate - THC-V Resin", ingredient_type: "Hijnx", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "coco butter", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "shea butter", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "stearic acid", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "e-wax", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "bees wax", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "sweet almond oil", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "apricot seed oil", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "coconut oil", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "menthol", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "vitamin e oil", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "peppermint", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "lavender", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "eucalyptus", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "clove", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "black pepper", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "camphor", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 },
+  { ingredient_name: "copaiba", ingredient_type: "Topicals", default_unit: "Gram", gram_conversion: 1 }
 ];
 
 function normalizeIngredientName(value) {
@@ -137,16 +212,24 @@ function bestIngredientMatch(importedName, inventoryNames = INVENTORY_INGREDIENT
   return best;
 }
 
+function designationForIngredient(name) {
+  const normalized = normalizeIngredientName(name);
+  return INGREDIENT_DESIGNATIONS.find((item) => normalizeIngredientName(item.ingredient_name) === normalized) || null;
+}
+
 function applyIngredientMatches(recipes, inventoryNames = INVENTORY_INGREDIENTS) {
   return recipes.map((recipe) => ({
     ...recipe,
     ingredients: (recipe.ingredients || []).map((ingredient) => {
       const original = ingredient.original_ingredient_name || ingredient.ingredient_name || "";
       const match = bestIngredientMatch(original, inventoryNames);
+      const designation = designationForIngredient(match.name);
       return {
         ...ingredient,
         original_ingredient_name: original,
         ingredient_name: match.name || original,
+        ingredient_type: ingredient.ingredient_type || designation?.ingredient_type || "",
+        unit: ingredient.unit || "grams",
         match_confidence: Number(match.confidence.toFixed(4)),
         match_status: match.status
       };
@@ -156,7 +239,9 @@ function applyIngredientMatches(recipes, inventoryNames = INVENTORY_INGREDIENTS)
 
 module.exports = {
   INVENTORY_INGREDIENTS,
+  INGREDIENT_DESIGNATIONS,
   normalizeIngredientName,
   bestIngredientMatch,
+  designationForIngredient,
   applyIngredientMatches
 };

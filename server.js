@@ -133,6 +133,9 @@ app.post("/api/ingredients", asyncRoute(async (req, res) => {
     unit: req.body.default_unit,
     vendor: req.body.default_vendor,
     cost_per_unit: req.body.default_cost,
+    unit_of_measure: req.body.unit_of_measure,
+    grams_conversion: req.body.grams_conversion,
+    gram_conversion: req.body.default_grams_conversion,
     notes: req.body.notes
   }]);
   res.status(201).json(await getIngredient(req.body.ingredient_name));
