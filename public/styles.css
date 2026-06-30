@@ -227,6 +227,19 @@ th {
   margin-top: 14px;
 }
 
+.active-additive-table {
+  min-width: 900px;
+}
+
+.active-additive-table input,
+.active-additive-table select {
+  min-width: 140px;
+}
+
+.active-additive-table .calculated {
+  background: #eef5f7;
+}
+
 input[readonly] {
   color: #4f6375;
   cursor: not-allowed;
@@ -284,8 +297,8 @@ input[readonly] {
   background: #fff5f5;
 }
 
-.match-review input[data-field="ingredient_name"],
-.match-review input[data-ingredient-field="ingredient_name"] {
+.match-review [data-field="ingredient_name"],
+.match-review [data-ingredient-field="ingredient_name"] {
   border-color: var(--red);
   box-shadow: 0 0 0 2px rgba(178, 58, 58, 0.12);
 }

@@ -424,11 +424,41 @@ function findActiveIngredientIndex(recipe) {
   return index >= 0 ? index : 0;
 }
 
+function newAdditiveCalculation(name = "", ingredientIndex = "") {
+  return {
+    id: `additive-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    ingredient_name: name,
+    ingredient_index: ingredientIndex,
+    percent_of_active: 100
+  };
+}
+
+function ensureActiveAdditives(recipe) {
+  if (!recipe.active_additives) {
+    const ingredients = recipe.ingredients || [];
+    const index = findActiveIngredientIndex(recipe);
+    recipe.active_additives = ingredients.length
+      ? [newAdditiveCalculation(ingredients[index]?.ingredient_name || "", String(index))]
+      : [];
+  }
+  return recipe.active_additives;
+}
+
+function existingIngredientOptions(value = "") {
+  const ingredients = state.currentRecipe?.ingredients || [];
+  return `
+    <option value="" ${value === "" ? "selected" : ""}>Select ingredient</option>
+    ${ingredients.map((item, index) => `<option value="${index}" ${String(index) === String(value) ? "selected" : ""}>${escapeHtml(item.ingredient_name || `Ingredient ${index + 1}`)}</option>`).join("")}
+  `;
+}
+
+function additiveRowAmount(row, calculations) {
+  return numeric(calculations?.active_ingredient_grams) * (numeric(row.percent_of_active, 100) / 100);
+}
+
 function renderActiveAdditiveTool(recipe, locked = false) {
   const c = recipe.calculations || {};
-  const ingredients = recipe.ingredients || [];
-  const selectedIndex = Math.min(findActiveIngredientIndex(recipe), Math.max(ingredients.length - 1, 0));
-  const selectedName = ingredients[selectedIndex]?.ingredient_name || "";
+  const additives = ensureActiveAdditives(recipe);
   return `
     <section class="section" id="activeAdditiveTool">
       <div class="section-header">
@@ -443,20 +473,34 @@ function renderActiveAdditiveTool(recipe, locked = false) {
         <div class="metric"><strong>Estimated units</strong><p>${qty(c.estimated_yield)}</p></div>
         <div class="metric"><strong>Total additive needed</strong><p>${qty(c.active_ingredient_grams)} grams</p></div>
       </div>
-      <div class="grid active-tool-controls">
-        <label>Match calculated amount to recipe ingredient
-          <select id="activeIngredientSelect" ${locked || !ingredients.length ? "disabled" : ""}>
-            ${ingredients.length ? ingredients.map((item, index) => `<option value="${index}" ${index === selectedIndex ? "selected" : ""}>${escapeHtml(item.ingredient_name || `Ingredient ${index + 1}`)}</option>`).join("") : '<option value="">No ingredients yet</option>'}
-          </select>
-        </label>
-        <label>Add additive ingredient
-          <select id="activeIngredientName" ${locked ? "disabled" : ""}>${ingredientNameOptions(selectedName)}</select>
-        </label>
+      <div class="table-wrap active-additive-wrap">
+        <table class="active-additive-table">
+          <thead>
+            <tr>
+              <th>Additive</th>
+              <th>% of active target</th>
+              <th>Calculated grams</th>
+              <th>Match to recipe ingredient</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${additives.length ? additives.map((row, index) => `
+              <tr data-additive-index="${index}">
+                <td><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
+                <td><input type="number" step="any" min="0" data-additive-field="percent_of_active" value="${escapeHtml(row.percent_of_active ?? 100)}" ${locked ? "readonly" : ""}></td>
+                <td><input class="calculated" readonly value="${qty(additiveRowAmount(row, c))}"></td>
+                <td><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
+                <td><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
+              </tr>
+            `).join("") : '<tr><td colspan="5" class="helper">No additive calculations yet.</td></tr>'}
+          </tbody>
+        </table>
       </div>
       <div class="toolbar active-tool-actions">
-        <button id="applyActiveQty" class="primary" ${locked || !ingredients.length ? "disabled" : ""}>Apply Calculated Qty</button>
-        <button id="addActiveIngredient" ${locked ? "disabled" : ""}>Add Additive</button>
-        <button id="deleteActiveIngredient" class="danger" ${locked || !ingredients.length ? "disabled" : ""}>Delete Selected Additive</button>
+        <button id="applyActiveQty" class="primary" ${locked || !additives.length ? "disabled" : ""}>Apply Calculated Qty To Matches</button>
+        <button id="addActiveToRecipe" ${locked ? "disabled" : ""}>Add New Additive To Recipe</button>
+        <button id="addAdditiveCalculation" ${locked ? "disabled" : ""}>New Additive Calculation</button>
       </div>
       ${locked ? '<div class="helper">Formula ingredient quantities are locked for this recipe mode. Use Duplicate and Start New Recipe to create an editable formula.</div>' : ""}
     </section>
@@ -514,55 +558,68 @@ function applyBatchQuantityToIngredient(index, batchQty) {
 }
 
 function bindActiveAdditiveTool() {
-  const select = content.querySelector("#activeIngredientSelect");
-  const nameInput = content.querySelector("#activeIngredientName");
-  select?.addEventListener("change", () => {
-    const item = state.currentRecipe.ingredients[Number(select.value)];
-    if (nameInput && item) nameInput.value = item.ingredient_name || "";
+  ensureActiveAdditives(state.currentRecipe);
+  content.querySelectorAll("[data-additive-field]").forEach((input) => {
+    const updateAdditive = () => {
+      const row = input.closest("[data-additive-index]");
+      const additive = state.currentRecipe.active_additives[Number(row.dataset.additiveIndex)];
+      if (!additive) return;
+      additive[input.dataset.additiveField] = input.type === "number" ? Number(input.value) : input.value;
+      if (input.dataset.additiveField === "ingredient_index") {
+        const ingredient = state.currentRecipe.ingredients[Number(additive.ingredient_index)];
+        if (ingredient) additive.ingredient_name = ingredient.ingredient_name || additive.ingredient_name || "";
+      }
+      if (input.dataset.additiveField === "ingredient_name") {
+        const ingredient = state.currentRecipe.ingredients[Number(additive.ingredient_index)];
+        if (ingredient) {
+          ingredient.ingredient_name = additive.ingredient_name;
+          applyMasterIngredientDefaults(ingredient, masterIngredientByName(additive.ingredient_name));
+          renderIngredientRows();
+        }
+      }
+      refreshCalculationDisplay(true);
+    };
+    input.addEventListener("change", updateAdditive);
   });
   content.querySelector("#applyActiveQty")?.addEventListener("click", () => {
-    const index = Number(select?.value);
-    const amount = numeric(state.currentRecipe.calculations?.active_ingredient_grams);
-    if (!Number.isFinite(index) || !state.currentRecipe.ingredients[index]) {
-      showToast("Select an ingredient before applying the additive amount.");
-      return;
+    let applied = 0;
+    for (const additive of state.currentRecipe.active_additives || []) {
+      const index = Number(additive.ingredient_index);
+      if (!Number.isFinite(index) || !state.currentRecipe.ingredients[index]) continue;
+      applyBatchQuantityToIngredient(index, additiveRowAmount(additive, state.currentRecipe.calculations));
+      applied += 1;
     }
-    applyBatchQuantityToIngredient(index, amount);
     renderIngredientRows();
     refreshCalculationDisplay(true);
-    showToast("Calculated additive quantity applied.");
+    showToast(applied ? "Calculated additive quantities applied." : "Match an additive to a recipe ingredient first.");
   });
-  content.querySelector("#addActiveIngredient")?.addEventListener("click", () => {
-    const name = (nameInput?.value || "").trim();
-    if (!name) {
-      showToast("Enter an additive ingredient name first.");
-      return;
-    }
+  content.querySelector("#addActiveToRecipe")?.addEventListener("click", () => {
+    const name = "";
     const ingredient = {
       ingredient_name: name,
-      ingredient_type: masterIngredientByName(name)?.ingredient_type || "",
+      ingredient_type: "",
       unit: "grams",
       formula_qty: 0,
       formula_percent: 0,
       batch_qty: 0,
       notes: "Active/additive calculated from target dose and potency."
     };
-    applyMasterIngredientDefaults(ingredient, masterIngredientByName(name));
     const newIndex = state.currentRecipe.ingredients.push(ingredient) - 1;
+    state.currentRecipe.active_additives.push(newAdditiveCalculation(name, String(newIndex)));
     renderIngredientRows();
     refreshCalculationDisplay(true);
-    const nextSelect = content.querySelector("#activeIngredientSelect");
-    if (nextSelect) nextSelect.value = String(newIndex);
-    showToast("Additive ingredient added.");
+    showToast("New additive added to recipe and calculator.");
   });
-  content.querySelector("#deleteActiveIngredient")?.addEventListener("click", () => {
-    const index = Number(select?.value);
-    if (!Number.isFinite(index) || !state.currentRecipe.ingredients[index]) return;
-    state.currentRecipe.ingredients.splice(index, 1);
-    renderIngredientRows();
+  content.querySelector("#addAdditiveCalculation")?.addEventListener("click", () => {
+    state.currentRecipe.active_additives.push(newAdditiveCalculation("", ""));
     refreshCalculationDisplay(true);
-    showToast("Selected additive removed.");
+    showToast("New additive calculation added.");
   });
+  content.querySelectorAll("[data-remove-additive]").forEach((button) => button.addEventListener("click", () => {
+    state.currentRecipe.active_additives.splice(Number(button.dataset.removeAdditive), 1);
+    refreshCalculationDisplay(true);
+    showToast("Additive calculation removed.");
+  }));
 }
 
 function renderIngredientRows() {
