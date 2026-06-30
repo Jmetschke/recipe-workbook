@@ -62,7 +62,7 @@ function additiveIdFromLabel(label) {
   const numbered = value.match(/additive\s*#?\s*(\d+)/);
   if (numbered) return `additive-${numbered[1]}`;
   if (value.includes("mushroom")) return "mushroom";
-  if (value.includes("additive")) return "additive-1";
+  if (value === "additive") return "additive-1";
   return value.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "additive-1";
 }
 
