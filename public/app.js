@@ -243,14 +243,20 @@ function recipeCards(recipes) {
         <button data-open="${recipe.id}">Open</button>
         <button data-duplicate="${recipe.id}">Duplicate</button>
         <button data-duplicate-new="${recipe.id}">Duplicate and Start New Recipe</button>
+        ${recipe.status === "Archived" ? "" : `<button data-archive-card="${recipe.id}" class="danger">Archive</button>`}
+        <button data-delete-card="${recipe.id}" class="danger">Delete</button>
       </div>
     </article>
   `).join("")}</div>`;
 }
 
 async function renderDashboard(filter = "All") {
-  state.view = filter === "Draft" ? "drafts" : "dashboard";
-  setPage(filter === "Draft" ? "Draft Recipes" : "Dashboard", "Search and manage recipe drafts, published formulas, and archived records.");
+  state.view = filter === "Draft" ? "drafts" : filter === "Archived" ? "archived" : "dashboard";
+  const pageName = filter === "Draft" ? "Draft Recipes" : filter === "Archived" ? "Archived Recipes" : "Dashboard";
+  const pageHelp = filter === "Archived"
+    ? "Archived recipes are kept out of active production views but can still be opened or deleted."
+    : "Search and manage recipe drafts, published formulas, and archived records.";
+  setPage(pageName, pageHelp);
   await loadRecipes(filter === "All" ? {} : { status: filter });
   content.innerHTML = `
     <section class="section">
@@ -289,6 +295,18 @@ function bindRecipeListButtons() {
     const copy = await api(`/api/recipes/${button.dataset.duplicateNew}/duplicate-new`, { method: "POST", body: {} });
     showToast("Started a new recipe from the duplicate.");
     renderEditor(copy.id);
+  }));
+  content.querySelectorAll("[data-archive-card]").forEach((button) => button.addEventListener("click", async () => {
+    if (!window.confirm("Archive this recipe?")) return;
+    await api(`/api/recipes/${button.dataset.archiveCard}/archive`, { method: "PATCH", body: {} });
+    showToast("Recipe archived.");
+    renderDashboard(state.view === "archived" ? "Archived" : content.querySelector("#statusFilter")?.value || "All");
+  }));
+  content.querySelectorAll("[data-delete-card]").forEach((button) => button.addEventListener("click", async () => {
+    if (!window.confirm("Delete this recipe and any published versions?")) return;
+    await api(`/api/recipes/${button.dataset.deleteCard}`, { method: "DELETE" });
+    showToast("Recipe deleted.");
+    renderDashboard(state.view === "archived" ? "Archived" : content.querySelector("#statusFilter")?.value || "All");
   }));
 }
 
@@ -329,7 +347,7 @@ async function renderEditor(id, recipe = null, mode = null) {
       <div class="section-header">
         <div>${statusBadge(r)}</div>
         <div class="toolbar">
-          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : '<button id="saveRecipe" class="primary">Save Draft</button>'}
+          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">Save Draft</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
           ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
           ${r.id && !publishedView ? '<button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
         </div>
@@ -1045,7 +1063,7 @@ async function renderVersionCard(versionId) {
   const recipe = version.recipe;
   const calculations = version.calculations;
   content.innerHTML = `
-    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print</button><button id="backCards">Back</button></div>
+    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
     <article class="card-page">
       <header class="section-header">
         <div>
@@ -1085,6 +1103,12 @@ async function renderVersionCard(versionId) {
     </article>
   `;
   content.querySelector("#backCards").addEventListener("click", () => renderCards());
+  content.querySelector("#deleteCardRecipe").addEventListener("click", async () => {
+    if (!window.confirm("Delete this recipe and any published versions?")) return;
+    await api(`/api/recipes/${recipe.id}`, { method: "DELETE" });
+    showToast("Recipe deleted.");
+    renderCards();
+  });
 }
 
 async function renderIngredients() {
@@ -1131,6 +1155,7 @@ document.querySelectorAll(".nav").forEach((button) => button.addEventListener("c
   if (button.dataset.view === "import") renderImport();
   if (button.dataset.view === "drafts") renderDashboard("Draft");
   if (button.dataset.view === "cards") renderCards();
+  if (button.dataset.view === "archived") renderDashboard("Archived");
   if (button.dataset.view === "ingredients") renderIngredients();
   if (button.dataset.view === "settings") renderSettings();
 }));
