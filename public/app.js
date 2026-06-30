@@ -54,14 +54,67 @@ function normalizePercentInput(value) {
   return parsed > 1 ? parsed / 100 : parsed;
 }
 
+function isActiveIngredient(item) {
+  const name = `${item?.ingredient_name || ""}`.toLowerCase();
+  return name.includes("concentrate") || name.includes("isolate") || name.includes("resin") || name.includes("additive") || name.includes("active");
+}
+
+function activeIngredientIndex(ingredients = []) {
+  const index = ingredients.findIndex(isActiveIngredient);
+  return index >= 0 ? index : "";
+}
+
+function normalizeActiveAdditivesForCalculation(recipe, ingredients = [], estimatedYield = 0) {
+  const rows = Array.isArray(recipe.active_additives) ? recipe.active_additives : [];
+  const fallbackTargetMg = numeric(recipe.target_mg_per_unit);
+  const fallbackPotency = recipe.potency_percent;
+  const fallbackIndex = activeIngredientIndex(ingredients);
+  const sourceRows = rows.length
+    ? rows
+    : fallbackTargetMg || numeric(fallbackPotency)
+      ? [{
+        ingredient_name: ingredients[fallbackIndex]?.ingredient_name || "",
+        ingredient_index: fallbackIndex,
+        target_mg_per_unit: fallbackTargetMg,
+        potency_percent: fallbackPotency
+      }]
+      : [];
+
+  return sourceRows.map((row, index) => {
+    const oldPercentOfActive = row.percent_of_active === undefined || row.percent_of_active === null || row.percent_of_active === ""
+      ? 100
+      : numeric(row.percent_of_active, 100);
+    const targetMg = row.target_mg_per_unit === undefined || row.target_mg_per_unit === null || row.target_mg_per_unit === ""
+      ? fallbackTargetMg * (oldPercentOfActive / 100)
+      : numeric(row.target_mg_per_unit);
+    const potencyInput = row.potency_percent === undefined || row.potency_percent === null || row.potency_percent === ""
+      ? fallbackPotency
+      : row.potency_percent;
+    const potencyFraction = normalizePercentInput(potencyInput);
+    const physicalMgPerUnit = potencyFraction > 0 && targetMg > 0 ? targetMg / potencyFraction : 0;
+    const physicalGramsPerUnit = physicalMgPerUnit / 1000;
+    const calculatedGrams = physicalGramsPerUnit > 0 && estimatedYield > 0 ? physicalGramsPerUnit * estimatedYield : 0;
+    return {
+      ...row,
+      id: row.id || `additive-${Date.now()}-${index}`,
+      ingredient_name: row.ingredient_name || "",
+      ingredient_index: row.ingredient_index ?? "",
+      target_mg_per_unit: targetMg,
+      potency_percent: potencyInput || "",
+      potency_fraction: potencyFraction,
+      physical_mg_per_unit: physicalMgPerUnit,
+      physical_grams_per_unit: physicalGramsPerUnit,
+      calculated_grams: calculatedGrams
+    };
+  });
+}
+
 function calculateClientRecipe(recipe) {
   const ingredients = recipe.ingredients || [];
   const batchSizeInput = numeric(recipe.batch_size);
   const unitWeight = numeric(recipe.unit_weight);
   const batchSizeMode = recipe.batch_size_mode === "units" ? "units" : "grams";
   const totalBatchGrams = batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
-  const targetMg = numeric(recipe.target_mg_per_unit);
-  const potencyPercent = normalizePercentInput(recipe.potency_percent);
   const formulaTotal = ingredients.reduce((sum, item) => sum + numeric(item.formula_qty), 0);
   const estimatedYield = batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
 
@@ -83,13 +136,10 @@ function calculateClientRecipe(recipe) {
 
   const percentTotal = normalizedIngredients.reduce((sum, item) => sum + numeric(item.formula_percent), 0);
   const batchTotal = normalizedIngredients.reduce((sum, item) => sum + numeric(item.batch_qty), 0);
-  const activeMassPerUnitMg = potencyPercent > 0 && targetMg > 0
-    ? targetMg / potencyPercent
-    : 0;
-  const activeMassPerUnitGrams = activeMassPerUnitMg / 1000;
-  const activeIngredientGrams = activeMassPerUnitGrams > 0 && estimatedYield > 0
-    ? activeMassPerUnitGrams * estimatedYield
-    : 0;
+  const activeAdditives = normalizeActiveAdditivesForCalculation(recipe, normalizedIngredients, estimatedYield);
+  const activeMassPerUnitMg = activeAdditives.reduce((sum, row) => sum + numeric(row.physical_mg_per_unit), 0);
+  const activeMassPerUnitGrams = activeAdditives.reduce((sum, row) => sum + numeric(row.physical_grams_per_unit), 0);
+  const activeIngredientGrams = activeAdditives.reduce((sum, row) => sum + numeric(row.calculated_grams), 0);
   const warnings = [];
 
   if (Math.abs(percentTotal - 1) > 0.005) {
@@ -114,7 +164,8 @@ function calculateClientRecipe(recipe) {
     total_active_additive_grams: activeIngredientGrams,
     active_mass_per_unit_mg: activeMassPerUnitMg,
     active_mass_per_unit_grams: activeMassPerUnitGrams,
-    potency_fraction: potencyPercent,
+    potency_fraction: activeAdditives[0]?.potency_fraction || 0,
+    active_additives: activeAdditives,
     additive_limit_percent: 4,
     warnings,
     ingredients: normalizedIngredients
@@ -403,6 +454,7 @@ function blankRecipe() {
     potency_percent: 0,
     expected_production_date: "",
     copy_lock_formula: false,
+    active_additives: [],
     notes: [],
     ingredients: [],
     steps: []
@@ -441,8 +493,6 @@ async function renderEditor(id, recipe = null, mode = null) {
         ${field("batch_size", r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", publishedView)}
         ${field("unit_weight", "Weight per unit", r.unit_weight, r.batch_size_mode === "units" ? "Required to convert units to total batch grams." : "Reference value only for estimating yield from total grams.", "number", publishedView)}
         ${field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", publishedView || publishedEdit)}
-        ${field("target_mg_per_unit", "Target active mg per unit", r.target_mg_per_unit, "Desired active dose in each stick, gummy, or piece.", "number", publishedView)}
-        ${field("potency_percent", "Active concentration / potency %", r.potency_percent, "Enter 81.2 for 81.2%, or 0.812 if copied from a spreadsheet.", "number", publishedView)}
       </div>
       ${formulaLocked ? '<div class="warning">This recipe formula is locked. Formula quantity, formula percent, and batch quantity are not directly editable, but recalculations can still update them.</div>' : ""}
     </section>
@@ -507,19 +557,15 @@ function renderMetrics(recipe) {
         <div class="metric"><strong>Batch total</strong><p>${qty(c.batch_total)} grams</p></div>
         <div class="metric"><strong>Estimated yield</strong><p>${qty(c.estimated_yield)} units</p></div>
       </div>
-      <div class="helper">Active/additive math: ${qty(c.active_mass_per_unit_mg)} mg physical additive per unit (${qty(c.active_mass_per_unit_grams)} g) × ${qty(c.estimated_yield)} units = ${qty(c.active_ingredient_grams)} grams total additive.</div>
+      <div class="helper">Active/additive math totals: ${qty(c.active_mass_per_unit_mg)} mg physical additive per unit across ${(c.active_additives || []).length} additive calculation(s), ${qty(c.active_ingredient_grams)} grams total additive for ${qty(c.estimated_yield)} units.</div>
       ${(c.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
     </section>
   `;
 }
 
 function findActiveIngredientIndex(recipe) {
-  const ingredients = recipe.ingredients || [];
-  const index = ingredients.findIndex((item) => {
-    const name = `${item.ingredient_name || ""}`.toLowerCase();
-    return name.includes("concentrate") || name.includes("isolate") || name.includes("resin") || name.includes("additive") || name.includes("active");
-  });
-  return index >= 0 ? index : 0;
+  const index = activeIngredientIndex(recipe.ingredients || []);
+  return index === "" ? 0 : index;
 }
 
 function newAdditiveCalculation(name = "", ingredientIndex = "") {
@@ -527,7 +573,8 @@ function newAdditiveCalculation(name = "", ingredientIndex = "") {
     id: `additive-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     ingredient_name: name,
     ingredient_index: ingredientIndex,
-    percent_of_active: 100
+    target_mg_per_unit: "",
+    potency_percent: ""
   };
 }
 
@@ -551,7 +598,12 @@ function existingIngredientOptions(value = "") {
 }
 
 function additiveRowAmount(row, calculations) {
-  return numeric(calculations?.active_ingredient_grams) * (numeric(row.percent_of_active, 100) / 100);
+  const calculated = (calculations?.active_additives || []).find((item) => item.id === row.id);
+  return numeric(calculated?.calculated_grams ?? row.calculated_grams);
+}
+
+function additiveCalculatedRow(row, calculations) {
+  return (calculations?.active_additives || []).find((item) => item.id === row.id) || row;
 }
 
 function renderActiveAdditiveTool(recipe, locked = false) {
@@ -562,21 +614,23 @@ function renderActiveAdditiveTool(recipe, locked = false) {
       <div class="section-header">
         <div>
           <h2>Active / Additive Calculator</h2>
-          <p class="helper">Uses target mg per unit and potency % to calculate physical additive mass, then applies that amount to a recipe ingredient.</p>
+          <p class="helper">Each additive has its own target mg per unit and potency %. The app calculates physical grams for each row and applies it to the matched recipe ingredient.</p>
         </div>
       </div>
       <div class="grid">
-        <div class="metric"><strong>Physical additive per unit</strong><p>${qty(c.active_mass_per_unit_mg)} mg</p></div>
-        <div class="metric"><strong>Physical additive per unit</strong><p>${qty(c.active_mass_per_unit_grams)} grams</p></div>
+        <div class="metric"><strong>Total physical additive per unit</strong><p>${qty(c.active_mass_per_unit_mg)} mg</p></div>
+        <div class="metric"><strong>Total physical additive per unit</strong><p>${qty(c.active_mass_per_unit_grams)} grams</p></div>
         <div class="metric"><strong>Estimated units</strong><p>${qty(c.estimated_yield)}</p></div>
-        <div class="metric"><strong>Total additive needed</strong><p>${qty(c.active_ingredient_grams)} grams</p></div>
+        <div class="metric"><strong>Total additive grams</strong><p>${qty(c.active_ingredient_grams)} grams</p></div>
       </div>
       <div class="table-wrap active-additive-wrap">
         <table class="active-additive-table">
           <thead>
             <tr>
               <th>Additive</th>
-              <th>% of active target</th>
+              <th>Target mg/unit</th>
+              <th>Potency %</th>
+              <th>Physical mg/unit</th>
               <th>Calculated grams</th>
               <th>Match to recipe ingredient</th>
               <th></th>
@@ -585,13 +639,20 @@ function renderActiveAdditiveTool(recipe, locked = false) {
           <tbody>
             ${additives.length ? additives.map((row, index) => `
               <tr data-additive-index="${index}">
-                <td><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
-                <td><input type="number" step="any" min="0" data-additive-field="percent_of_active" value="${escapeHtml(row.percent_of_active ?? 100)}" ${locked ? "readonly" : ""}></td>
-                <td><input class="calculated" readonly value="${qty(additiveRowAmount(row, c))}"></td>
+                ${(() => {
+                  const calculated = additiveCalculatedRow(row, c);
+                  return `
+                    <td><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
+                    <td><input type="number" step="any" min="0" data-additive-field="target_mg_per_unit" value="${escapeHtml(row.target_mg_per_unit ?? "")}" ${locked ? "readonly" : ""}></td>
+                    <td><input type="number" step="any" min="0" data-additive-field="potency_percent" value="${escapeHtml(row.potency_percent ?? "")}" ${locked ? "readonly" : ""}></td>
+                    <td><input class="calculated" readonly value="${qty(calculated.physical_mg_per_unit)}"></td>
+                    <td><input class="calculated" readonly value="${qty(calculated.calculated_grams)}"></td>
+                  `;
+                })()}
                 <td><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
                 <td><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
               </tr>
-            `).join("") : '<tr><td colspan="5" class="helper">No additive calculations yet.</td></tr>'}
+            `).join("") : '<tr><td colspan="7" class="helper">No additive calculations yet.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -608,8 +669,10 @@ function renderActiveAdditiveTool(recipe, locked = false) {
 function refreshCalculationDisplay(updateRows = false) {
   if (!state.currentRecipe) return;
   state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+  state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
   if (state.currentRecipe.active_additives?.length && applyAdditiveCalculationsToMatches()) {
     state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+    state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
   }
   state.currentRecipe.ingredients = state.currentRecipe.calculations.ingredients;
   const summary = content.querySelector("#calcSummary");
@@ -857,6 +920,12 @@ function collectRecipe() {
   state.currentRecipe.ingredients = (state.currentRecipe.ingredients || []).map((item, index) => ({ ...item, sort_order: index + 1 }));
   state.currentRecipe.steps = (state.currentRecipe.steps || []).map((step, index) => ({ ...step, sort_order: index + 1 }));
   state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+  state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
+  if (state.currentRecipe.active_additives.length) {
+    applyAdditiveCalculationsToMatches();
+    state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+    state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
+  }
   state.currentRecipe.ingredients = state.currentRecipe.calculations.ingredients;
   return state.currentRecipe;
 }
@@ -997,9 +1066,24 @@ function renderImportPreview() {
             ${importSelectField(index, "batch_size_mode", "Batch size means", recipe.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]])}
             ${importField(index, "batch_size", "Batch size", recipe.batch_size, "number")}
             ${importField(index, "unit_weight", "Weight per unit", recipe.unit_weight, "number")}
-            ${importField(index, "target_mg_per_unit", "Target mg/unit", recipe.target_mg_per_unit, "number")}
-            ${importField(index, "potency_percent", "Potency %", recipe.potency_percent, "number")}
           </div>
+          ${(recipe.active_additives || []).length ? `
+            <div class="table-wrap active-additive-wrap">
+              <table class="active-additive-table">
+                <thead><tr><th>Additive</th><th>Target mg/unit</th><th>Potency %</th><th>Match to recipe ingredient</th></tr></thead>
+                <tbody>
+                  ${(recipe.active_additives || []).map((row, additiveIndex) => `
+                    <tr>
+                      <td><select data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="ingredient_name">${ingredientNameOptions(row.ingredient_name || "")}</select></td>
+                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="target_mg_per_unit" value="${escapeHtml(row.target_mg_per_unit ?? "")}"></td>
+                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="potency_percent" value="${escapeHtml(row.potency_percent ?? "")}"></td>
+                      <td><select data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="ingredient_index">${existingImportIngredientOptions(recipe, row.ingredient_index ?? "")}</select></td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          ` : ""}
           <details>
             <summary>${recipe.ingredients.length} ingredients, ${recipe.steps.length} SOP steps</summary>
             <div class="table-wrap">
@@ -1071,6 +1155,19 @@ function renderImportPreview() {
     input.addEventListener("input", updateImportIngredient);
     input.addEventListener("change", updateImportIngredient);
   });
+  area.querySelectorAll("[data-import-additive]").forEach((input) => {
+    const updateImportAdditive = () => {
+      const recipe = preview.recipes[Number(input.dataset.importAdditive)];
+      const additive = recipe.active_additives[Number(input.dataset.additiveIndex)];
+      additive[input.dataset.additiveField] = input.type === "number" ? Number(input.value) : input.value;
+      if (input.dataset.additiveField === "ingredient_index") {
+        const ingredient = recipe.ingredients[Number(additive.ingredient_index)];
+        if (ingredient) additive.ingredient_name = ingredient.ingredient_name || additive.ingredient_name || "";
+      }
+    };
+    input.addEventListener("input", updateImportAdditive);
+    input.addEventListener("change", updateImportAdditive);
+  });
   area.querySelectorAll("[data-import-step]").forEach((textarea) => textarea.addEventListener("input", () => {
     const recipe = preview.recipes[Number(textarea.dataset.importStep)];
     recipe.steps[Number(textarea.dataset.stepIndex)].instruction_text = textarea.value;
@@ -1089,6 +1186,13 @@ function importField(index, name, label, value, type = "text") {
 
 function importSelectField(index, name, label, value, options) {
   return `<label>${label}<select data-index="${index}" data-import-select="${name}">${options.map(([optionValue, text]) => `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
+}
+
+function existingImportIngredientOptions(recipe, value = "") {
+  return `
+    <option value="" ${value === "" ? "selected" : ""}>Select ingredient</option>
+    ${(recipe.ingredients || []).map((item, index) => `<option value="${index}" ${String(index) === String(value) ? "selected" : ""}>${escapeHtml(item.ingredient_name || `Ingredient ${index + 1}`)}</option>`).join("")}
+  `;
 }
 
 async function renderCards(recipeId = null) {
@@ -1189,7 +1293,7 @@ async function renderVersionCard(versionId) {
       </table>
       <h2>Calculation Summary</h2>
       <p>Formula total: ${qty(calculations.formula_total)} • Percent total: ${pct(calculations.percent_total)} • Batch total: ${qty(calculations.batch_total)}</p>
-      <p>Active/additive: ${qty(calculations.active_mass_per_unit_mg)} mg physical additive per unit (${qty(calculations.active_mass_per_unit_grams)} g) × ${qty(calculations.estimated_yield)} units = ${qty(calculations.active_ingredient_grams)} grams total additive.</p>
+      <p>Active/additive totals: ${qty(calculations.active_mass_per_unit_mg)} mg physical additive per unit across ${(calculations.active_additives || []).length} additive calculation(s); ${qty(calculations.active_ingredient_grams)} grams total additive.</p>
       ${(calculations.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
       <h2>SOP / Process Instructions</h2>
       <ol>${version.steps.map((step) => `<li>${step.instruction_text}</li>`).join("")}</ol>

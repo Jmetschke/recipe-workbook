@@ -53,6 +53,7 @@ async function migrate() {
       copied_from_recipe_id INTEGER,
       copy_lock_formula INTEGER DEFAULT 0,
       is_new_recipe_duplicate INTEGER DEFAULT 0,
+      active_additives TEXT DEFAULT '[]',
       notes TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -142,6 +143,7 @@ async function migrate() {
   await addColumnIfMissing("recipes", "copied_from_recipe_id", "INTEGER");
   await addColumnIfMissing("recipes", "copy_lock_formula", "INTEGER DEFAULT 0");
   await addColumnIfMissing("recipes", "is_new_recipe_duplicate", "INTEGER DEFAULT 0");
+  await addColumnIfMissing("recipes", "active_additives", "TEXT DEFAULT '[]'");
   await execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ["additive_percent_limit", "4"]);
   await seedInventoryIngredients();
 }
@@ -163,6 +165,7 @@ function recipeFromRow(row) {
     has_unpublished_changes: Boolean(row.has_unpublished_changes),
     copy_lock_formula: Boolean(row.copy_lock_formula),
     is_new_recipe_duplicate: Boolean(row.is_new_recipe_duplicate),
+    active_additives: row.active_additives ? JSON.parse(row.active_additives) : [],
     notes: row.notes ? JSON.parse(row.notes) : []
   };
 }
@@ -251,14 +254,50 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
   }
 }
 
+function formulaBasisTotal(ingredients, excludeIndex = -1, totalBatchGrams = 0) {
+  const total = ingredients.reduce((sum, item, index) => (
+    index === excludeIndex ? sum : sum + Number(item.formula_qty || 0)
+  ), 0);
+  return total > 0 ? total : Number(totalBatchGrams || 0);
+}
+
+function applyBatchQuantityToIngredient(ingredients, index, batchQty, totalBatchGrams) {
+  const ingredient = ingredients[index];
+  if (!ingredient) return;
+  const percent = totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0;
+  const otherQtyTotal = formulaBasisTotal(ingredients, index, totalBatchGrams);
+  const formulaQty = percent >= 1
+    ? otherQtyTotal
+    : otherQtyTotal > 0
+      ? (percent * otherQtyTotal) / Math.max(1 - percent, 0.000001)
+      : batchQty;
+  ingredient.formula_percent = percent;
+  ingredient.formula_qty = formulaQty;
+  ingredient.batch_qty = batchQty;
+  ingredient.unit = ingredient.unit || "grams";
+  ingredient.notes = ingredient.notes || "Active/additive calculated from target dose and potency.";
+}
+
+async function calculateWithActiveMatches(recipe, ingredients) {
+  const settings = await allSettings();
+  const firstPass = calculateRecipe(recipe, ingredients, settings);
+  const nextIngredients = firstPass.ingredients.map((item) => ({ ...item }));
+  for (const additive of firstPass.active_additives || []) {
+    const index = Number(additive.ingredient_index);
+    if (!Number.isFinite(index) || !nextIngredients[index]) continue;
+    applyBatchQuantityToIngredient(nextIngredients, index, Number(additive.calculated_grams || 0), Number(firstPass.total_batch_grams || 0));
+  }
+  return calculateRecipe({ ...recipe, active_additives: firstPass.active_additives }, nextIngredients, settings);
+}
+
 async function createRecipe(input) {
-  const calculations = calculateRecipe(input, input.ingredients || [], await allSettings());
+  const calculations = await calculateWithActiveMatches(input, input.ingredients || []);
   const info = await execute(
     `INSERT INTO recipes (
       name, product_type, flavor, status, current_version, has_unpublished_changes, batch_size, batch_size_mode, batch_unit,
       unit_weight, unit_weight_unit, target_mg_per_unit, potency_percent, expected_production_date,
-      copied_from_recipe_id, copy_lock_formula, is_new_recipe_duplicate, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      copied_from_recipe_id, copy_lock_formula, is_new_recipe_duplicate, active_additives, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name || "Untitled Recipe",
       input.product_type || "",
@@ -277,6 +316,7 @@ async function createRecipe(input) {
       input.copied_from_recipe_id || null,
       input.copy_lock_formula ? 1 : 0,
       input.is_new_recipe_duplicate ? 1 : 0,
+      JSON.stringify(calculations.active_additives || input.active_additives || []),
       JSON.stringify(input.notes || [])
     ]
   );
@@ -299,13 +339,13 @@ async function updateRecipe(id, input) {
       batch_qty: ""
     }))
     : incomingIngredients.map((item) => ({ ...item, batch_qty: "" }));
-  const calculations = calculateRecipe(next, ingredientsForCalculation, await allSettings());
+  const calculations = await calculateWithActiveMatches(next, ingredientsForCalculation);
   const publishedDirty = existing.status === "Published" || existing.current_version;
   await execute(
     `UPDATE recipes SET
       name = ?, product_type = ?, flavor = ?, status = ?, current_version = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
       unit_weight = ?, unit_weight_unit = ?, target_mg_per_unit = ?, potency_percent = ?, expected_production_date = ?,
-      copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+      copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, active_additives = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
     [
       next.name || "Untitled Recipe",
@@ -325,6 +365,7 @@ async function updateRecipe(id, input) {
       next.copied_from_recipe_id || null,
       next.copy_lock_formula ? 1 : 0,
       next.is_new_recipe_duplicate ? 1 : 0,
+      JSON.stringify(calculations.active_additives || next.active_additives || []),
       JSON.stringify(next.notes || []),
       id
     ]
@@ -573,6 +614,12 @@ async function seed() {
     unit_weight_unit: "grams",
     target_mg_per_unit: 50,
     potency_percent: 80,
+    active_additives: [{
+      ingredient_name: "Concentrate - CBD Isolate",
+      ingredient_index: "17",
+      target_mg_per_unit: 50,
+      potency_percent: 80
+    }],
     ingredients: seedIngredientsStick(),
     steps: [
       "Set up double boiler on medium heat.",
@@ -596,6 +643,12 @@ async function seed() {
     unit_weight_unit: "grams",
     target_mg_per_unit: 47,
     potency_percent: 81.2,
+    active_additives: [{
+      ingredient_name: "Additive",
+      ingredient_index: "3",
+      target_mg_per_unit: 47,
+      potency_percent: 81.2
+    }],
     ingredients: [
       ["Melt-to-Make Gelatin Pucks", 0.7, 52500],
       ["Melt-to-Make Pectin Base Part A", 0.2542118227, 19065.8867],

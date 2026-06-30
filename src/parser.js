@@ -49,6 +49,26 @@ function splitTitle(title) {
   };
 }
 
+function activeIngredientIndex(ingredients = []) {
+  const index = ingredients.findIndex((item) => {
+    const name = `${item.ingredient_name || ""}`.toLowerCase();
+    return name.includes("concentrate") || name.includes("isolate") || name.includes("resin") || name.includes("additive") || name.includes("active");
+  });
+  return index >= 0 ? index : "";
+}
+
+function importedActiveAdditives(ingredients = [], targetMg = "", potencyPercent = "") {
+  if (!number(targetMg) && !number(potencyPercent)) return [];
+  const ingredientIndex = activeIngredientIndex(ingredients);
+  return [{
+    id: `imported-additive-${Date.now()}-${ingredientIndex || "unmatched"}`,
+    ingredient_name: ingredientIndex === "" ? "" : ingredients[ingredientIndex]?.ingredient_name || "",
+    ingredient_index: ingredientIndex,
+    target_mg_per_unit: number(targetMg),
+    potency_percent: potencyPercent || ""
+  }];
+}
+
 function detectWorkbookFormat(workbook) {
   const sheetNames = workbook.SheetNames.map((name) => name.toLowerCase());
   const joined = sheetNames.join(" | ");
@@ -120,6 +140,7 @@ function parseStickRubWorkbook(workbook) {
     unit_weight_unit: "grams",
     target_mg_per_unit: 50,
     potency_percent: "",
+    active_additives: importedActiveAdditives(ingredients, 50, ""),
     ingredients,
     steps,
     notes: ingredientSheet ? [`Imported ingredient list from sheet: ${ingredientSheet}`] : [],
@@ -188,6 +209,7 @@ function parseGummySheet(workbook, sheetName) {
     unit_weight_unit: "grams",
     target_mg_per_unit: target,
     potency_percent: potency,
+    active_additives: importedActiveAdditives(ingredients, target, potency),
     ingredients,
     steps,
     notes: [`Imported variant from sheet: ${sheetName}`],
