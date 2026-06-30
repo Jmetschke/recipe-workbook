@@ -303,7 +303,7 @@ function recipeCards(recipes) {
         <button data-open="${recipe.id}">Open</button>
         ${recipe.status === "Published" && recipe.current_version ? `<button data-print-card="${recipe.id}" class="primary">Printable Card</button>` : ""}
         <button data-duplicate="${recipe.id}">Duplicate</button>
-        <button data-duplicate-new="${recipe.id}">Duplicate and Start New Recipe</button>
+        <button data-duplicate-new="${recipe.id}" title="Duplicate and Start New Recipe">Start New Recipe</button>
         ${recipe.status === "Archived" ? "" : `<button data-archive-card="${recipe.id}" class="danger">Archive</button>`}
         <button data-delete-card="${recipe.id}" class="danger">Delete</button>
       </div>
