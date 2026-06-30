@@ -286,16 +286,15 @@ async function updateRecipe(id, input) {
   const existing = await getRecipe(id);
   if (!existing) return null;
   const next = { ...existing, ...input };
-  const formulaLocked = existing.copy_lock_formula || existing.status === "Published";
   const incomingIngredients = input.ingredients || existing.ingredients;
-  const ingredientsForCalculation = formulaLocked
+  const ingredientsForCalculation = existing.status === "Published"
     ? incomingIngredients.map((item, index) => ({
       ...item,
       formula_qty: existing.ingredients[index]?.formula_qty ?? item.formula_qty,
       formula_percent: existing.ingredients[index]?.formula_percent ?? item.formula_percent,
       batch_qty: ""
     }))
-    : incomingIngredients;
+    : incomingIngredients.map((item) => ({ ...item, batch_qty: "" }));
   const calculations = calculateRecipe(next, ingredientsForCalculation, await allSettings());
   const publishedDirty = existing.status === "Published" || existing.current_version;
   await execute(

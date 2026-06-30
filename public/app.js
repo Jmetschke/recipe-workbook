@@ -367,7 +367,7 @@ async function renderEditor(id, recipe = null, mode = null) {
       ${r.copy_lock_formula ? '<div class="warning">This is a locked formula copy. Formula quantity, formula percent, and batch quantity are locked and will publish with the copied version number.</div>' : ""}
     </section>
     ${renderMetrics(r)}
-    ${renderActiveAdditiveTool(r, publishedView || publishedEdit || r.copy_lock_formula)}
+    ${renderActiveAdditiveTool(r, publishedView || publishedEdit)}
     <section class="section">
       <div class="section-header">
         <h2>Ingredients</h2>
@@ -528,12 +528,15 @@ function renderActiveAdditiveTool(recipe, locked = false) {
 function refreshCalculationDisplay(updateRows = false) {
   if (!state.currentRecipe) return;
   state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+  if (state.currentRecipe.active_additives?.length && applyAdditiveCalculationsToMatches()) {
+    state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
+  }
   state.currentRecipe.ingredients = state.currentRecipe.calculations.ingredients;
   const summary = content.querySelector("#calcSummary");
   if (summary) summary.outerHTML = renderMetrics(state.currentRecipe);
   const activeTool = content.querySelector("#activeAdditiveTool");
   if (activeTool) {
-    const locked = state.editorMode === "published-view" || state.editorMode === "published-edit" || Boolean(state.currentRecipe.copy_lock_formula);
+    const locked = state.editorMode === "published-view" || state.editorMode === "published-edit";
     activeTool.outerHTML = renderActiveAdditiveTool(state.currentRecipe, locked);
     bindActiveAdditiveTool();
   }
@@ -575,6 +578,17 @@ function applyBatchQuantityToIngredient(index, batchQty) {
   ingredient.notes = ingredient.notes || "Active/additive calculated from target dose and potency.";
 }
 
+function applyAdditiveCalculationsToMatches() {
+  let applied = 0;
+  for (const additive of state.currentRecipe.active_additives || []) {
+    const index = Number(additive.ingredient_index);
+    if (!Number.isFinite(index) || !state.currentRecipe.ingredients[index]) continue;
+    applyBatchQuantityToIngredient(index, additiveRowAmount(additive, state.currentRecipe.calculations));
+    applied += 1;
+  }
+  return applied;
+}
+
 function bindActiveAdditiveTool() {
   ensureActiveAdditives(state.currentRecipe);
   content.querySelectorAll("[data-additive-field]").forEach((input) => {
@@ -595,18 +609,13 @@ function bindActiveAdditiveTool() {
           renderIngredientRows();
         }
       }
+      applyAdditiveCalculationsToMatches();
       refreshCalculationDisplay(true);
     };
     input.addEventListener("change", updateAdditive);
   });
   content.querySelector("#applyActiveQty")?.addEventListener("click", () => {
-    let applied = 0;
-    for (const additive of state.currentRecipe.active_additives || []) {
-      const index = Number(additive.ingredient_index);
-      if (!Number.isFinite(index) || !state.currentRecipe.ingredients[index]) continue;
-      applyBatchQuantityToIngredient(index, additiveRowAmount(additive, state.currentRecipe.calculations));
-      applied += 1;
-    }
+    const applied = applyAdditiveCalculationsToMatches();
     renderIngredientRows();
     refreshCalculationDisplay(true);
     showToast(applied ? "Calculated additive quantities applied." : "Match an additive to a recipe ingredient first.");
