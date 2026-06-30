@@ -223,6 +223,15 @@ function applyMasterIngredientDefaults(ingredient, master) {
   }
 }
 
+function suggestNextVersion(version) {
+  const value = String(version || "").trim();
+  const whole = value.match(/^v?(\d+)$/i);
+  if (whole) return `v${Number(whole[1]) + 1}`;
+  const dotted = value.match(/^v?(\d+)\.(\d+)$/i);
+  if (dotted) return `v${dotted[1]}.${Number(dotted[2]) + 1}`;
+  return value || "v1";
+}
+
 function statusBadge(recipe) {
   if (recipe.status === "Published" && recipe.has_unpublished_changes) return '<span class="badge Unpublished">Unpublished Changes</span>';
   return `<span class="badge ${recipe.status}">${recipe.status}</span>`;
@@ -241,6 +250,7 @@ function recipeCards(recipes) {
       ${recipe.expected_production_date ? `<p>Production ${recipe.expected_production_date}</p>` : ""}
       <div class="toolbar">
         <button data-open="${recipe.id}">Open</button>
+        ${recipe.status === "Published" && recipe.current_version ? `<button data-print-card="${recipe.id}" class="primary">Printable Card</button>` : ""}
         <button data-duplicate="${recipe.id}">Duplicate</button>
         <button data-duplicate-new="${recipe.id}">Duplicate and Start New Recipe</button>
         ${recipe.status === "Archived" ? "" : `<button data-archive-card="${recipe.id}" class="danger">Archive</button>`}
@@ -272,6 +282,7 @@ async function renderDashboard(filter = "All") {
           </label>
         </div>
       </div>
+      ${filter === "All" ? renderDashboardMiniCalendar(state.recipes) : ""}
       <div id="recipeList">${recipeCards(state.recipes)}</div>
     </section>
   `;
@@ -284,8 +295,48 @@ async function renderDashboard(filter = "All") {
   bindRecipeListButtons();
 }
 
+function renderDashboardMiniCalendar(recipes = []) {
+  const published = recipes.filter((recipe) => recipe.status === "Published");
+  const month = monthKey(published[0]?.expected_production_date || isoToday());
+  const [year, monthNumber] = month.split("-").map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const offset = new Date(year, monthNumber - 1, 1).getDay();
+  const byDate = new Map();
+  published.forEach((recipe) => {
+    const date = recipe.expected_production_date || recipe.updated_at?.slice(0, 10) || isoToday();
+    if (monthKey(date) !== month) return;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(recipe);
+  });
+  const cells = [];
+  for (let i = 0; i < offset; i += 1) cells.push('<div class="mini-calendar-cell muted-cell"></div>');
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${month}-${String(day).padStart(2, "0")}`;
+    const dayRecipes = byDate.get(date) || [];
+    cells.push(`
+      <div class="mini-calendar-cell">
+        <div class="calendar-day">${day}</div>
+        ${dayRecipes.slice(0, 2).map((recipe) => `<button class="mini-calendar-recipe" data-mini-card-recipe="${recipe.id}">${escapeHtml(recipe.name)}</button>`).join("")}
+        ${dayRecipes.length > 2 ? `<span class="helper">+${dayRecipes.length - 2} more</span>` : ""}
+      </div>
+    `);
+  }
+  return `
+    <section class="mini-calendar-section">
+      <div class="section-header">
+        <h2>Published Production Calendar</h2>
+        <button data-view-full-calendar>View Full Calendar</button>
+      </div>
+      <div class="mini-calendar-grid">${cells.join("")}</div>
+    </section>
+  `;
+}
+
 function bindRecipeListButtons() {
   content.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => renderEditor(button.dataset.open)));
+  content.querySelectorAll("[data-print-card]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.printCard)));
+  content.querySelectorAll("[data-mini-card-recipe]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.miniCardRecipe)));
+  content.querySelector("[data-view-full-calendar]")?.addEventListener("click", () => renderCards());
   content.querySelectorAll("[data-duplicate]").forEach((button) => button.addEventListener("click", async () => {
     const copy = await api(`/api/recipes/${button.dataset.duplicate}/duplicate`, { method: "POST", body: {} });
     showToast("Recipe duplicated.");
@@ -316,6 +367,7 @@ function blankRecipe() {
     product_type: "",
     flavor: "",
     status: "Draft",
+    current_version: "v1",
     batch_size: 0,
     batch_size_mode: "grams",
     batch_unit: "grams",
@@ -356,6 +408,7 @@ async function renderEditor(id, recipe = null, mode = null) {
         ${field("name", "Recipe name", r.name, "", "text", publishedView || publishedEdit)}
         ${field("product_type", "Product type", r.product_type, "", "text", publishedView || publishedEdit)}
         ${field("flavor", "Flavor", r.flavor, "", "text", publishedView || publishedEdit)}
+        ${field("current_version", "Version to publish", r.current_version || suggestNextVersion(r.current_version), "Editable recommendation used when this recipe is published.", "text", publishedView || publishedEdit)}
         ${field("expected_production_date", "Expected production date", r.expected_production_date, "Required before publishing. Published cards appear on this calendar date.", "date", publishedView || publishedEdit)}
         ${selectField("batch_size_mode", "Batch size means", r.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]], "Choose whether batch size is a total gram batch or a number of finished units.", publishedView || publishedEdit)}
         ${field("batch_size", r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", publishedView)}

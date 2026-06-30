@@ -299,7 +299,7 @@ async function updateRecipe(id, input) {
   const publishedDirty = existing.status === "Published" || existing.current_version;
   await execute(
     `UPDATE recipes SET
-      name = ?, product_type = ?, flavor = ?, status = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
+      name = ?, product_type = ?, flavor = ?, status = ?, current_version = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
       unit_weight = ?, unit_weight_unit = ?, target_mg_per_unit = ?, potency_percent = ?, expected_production_date = ?,
       copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
@@ -308,6 +308,7 @@ async function updateRecipe(id, input) {
       next.product_type || "",
       next.flavor || "",
       next.status === "Archived" ? "Archived" : "Draft",
+      next.current_version || "",
       publishedDirty ? 1 : 0,
       next.batch_size || 0,
       next.batch_size_mode === "units" ? "units" : "grams",
@@ -332,9 +333,20 @@ async function updateRecipe(id, input) {
 async function nextVersion(recipeId) {
   const latest = await get("SELECT version_number FROM recipe_versions WHERE recipe_id = ? ORDER BY id DESC LIMIT 1", [recipeId]);
   if (!latest) return "v1.0";
+  const whole = latest.version_number.match(/^v?(\d+)$/i);
+  if (whole) return `v${Number(whole[1]) + 1}`;
   const match = latest.version_number.match(/^v(\d+)\.(\d+)$/);
   if (!match) return "v1.0";
   return `v${match[1]}.${Number(match[2]) + 1}`;
+}
+
+function suggestNextVersion(version) {
+  const value = String(version || "").trim();
+  const whole = value.match(/^v?(\d+)$/i);
+  if (whole) return `v${Number(whole[1]) + 1}`;
+  const dotted = value.match(/^v?(\d+)\.(\d+)$/i);
+  if (dotted) return `v${dotted[1]}.${Number(dotted[2]) + 1}`;
+  return value || "v1";
 }
 
 async function publishRecipe(id, publishedBy = "Production") {
@@ -345,7 +357,7 @@ async function publishRecipe(id, publishedBy = "Production") {
     error.statusCode = 400;
     throw error;
   }
-  const version = recipe.copy_lock_formula && recipe.current_version ? recipe.current_version : await nextVersion(id);
+  const version = recipe.current_version || await nextVersion(id);
   const calculations = calculateRecipe(recipe, recipe.ingredients, await allSettings());
   await execute(
     `INSERT INTO recipe_versions (
@@ -378,9 +390,9 @@ async function duplicateRecipe(id, options = {}) {
   if (!recipe) return null;
   return createRecipe({
     ...recipe,
-    name: options.startNewRecipe ? `${recipe.name} New Recipe` : `${recipe.name} Copy`,
+    name: recipe.name,
     status: "Draft",
-    current_version: options.startNewRecipe ? "" : recipe.current_version,
+    current_version: suggestNextVersion(recipe.current_version),
     has_unpublished_changes: false,
     copied_from_recipe_id: recipe.id,
     copy_lock_formula: options.startNewRecipe ? false : true,
