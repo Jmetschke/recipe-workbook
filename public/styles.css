@@ -432,6 +432,24 @@ input[readonly] {
   padding-top: 7px;
 }
 
+.ingredient-print-header {
+  margin-bottom: 22px;
+}
+
+.ingredient-print-header h1 {
+  margin-bottom: 4px;
+}
+
+.ingredient-print-table th,
+.ingredient-print-table td {
+  vertical-align: top;
+}
+
+.ingredient-print-table .handwrite-cell {
+  min-width: 220px;
+  height: 42px;
+}
+
 @media (max-width: 820px) {
   .sidebar {
     position: static;
@@ -468,5 +486,9 @@ input[readonly] {
     border: 0;
     max-width: none;
     padding: 0;
+  }
+
+  .ingredient-print-table .handwrite-cell {
+    height: 48px;
   }
 }

@@ -1125,7 +1125,7 @@ async function renderVersionCard(versionId) {
   const recipe = version.recipe;
   const calculations = version.calculations;
   content.innerHTML = `
-    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
+    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="printIngredientsList">Printable Ingredients List</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
     <article class="card-page">
       <header class="section-header">
         <div>
@@ -1164,6 +1164,7 @@ async function renderVersionCard(versionId) {
       </div>
     </article>
   `;
+  content.querySelector("#printIngredientsList").addEventListener("click", () => renderPrintableIngredientList(version));
   content.querySelector("#backCards").addEventListener("click", () => renderCards());
   content.querySelector("#deleteCardRecipe").addEventListener("click", async () => {
     if (!window.confirm("Delete this recipe and any published versions?")) return;
@@ -1171,6 +1172,43 @@ async function renderVersionCard(versionId) {
     showToast("Recipe deleted.");
     renderCards();
   });
+}
+
+function renderPrintableIngredientList(version) {
+  const recipe = version.recipe;
+  content.innerHTML = `
+    <div class="toolbar no-print">
+      <button onclick="window.print()" class="primary">Print Ingredients List</button>
+      <button id="backToRecipeCard">Back To Recipe Card</button>
+    </div>
+    <article class="card-page ingredient-print-page">
+      <header class="ingredient-print-header">
+        <h1>Production Ingredient List</h1>
+        <p>${escapeHtml(recipe.name || "")} ${version.version_number ? `• ${escapeHtml(version.version_number)}` : ""}</p>
+      </header>
+      <table class="ingredient-print-table">
+        <thead>
+          <tr>
+            <th>Ingredient</th>
+            <th>Recipe Name</th>
+            <th>Input Grams Total</th>
+            <th>Ingredient Amount Added Confirmation</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${version.ingredients.map((item) => `
+            <tr>
+              <td>${escapeHtml(item.ingredient_name || "")}</td>
+              <td>${escapeHtml(recipe.name || "")}</td>
+              <td>${qty(item.batch_qty)} grams</td>
+              <td class="handwrite-cell"></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </article>
+  `;
+  content.querySelector("#backToRecipeCard").addEventListener("click", () => renderVersionCard(version.id));
 }
 
 async function renderIngredients() {
