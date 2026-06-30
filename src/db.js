@@ -179,6 +179,10 @@ function ingredientFromRow(row) {
   return ingredient;
 }
 
+function writableRecipeStatus(status) {
+  return ["Draft", "Template", "Archived"].includes(status) ? status : "Draft";
+}
+
 async function getRecipe(id) {
   const recipe = recipeFromRow(await get("SELECT * FROM recipes WHERE id = ?", [id]));
   if (!recipe) return null;
@@ -259,7 +263,7 @@ async function createRecipe(input) {
       input.name || "Untitled Recipe",
       input.product_type || "",
       input.flavor || "",
-      input.status || "Draft",
+      writableRecipeStatus(input.status),
       input.current_version || "",
       input.has_unpublished_changes ? 1 : 0,
       input.batch_size || 0,
@@ -307,7 +311,7 @@ async function updateRecipe(id, input) {
       next.name || "Untitled Recipe",
       next.product_type || "",
       next.flavor || "",
-      next.status === "Archived" ? "Archived" : "Draft",
+      writableRecipeStatus(next.status),
       next.current_version || "",
       publishedDirty ? 1 : 0,
       next.batch_size || 0,

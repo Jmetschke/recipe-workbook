@@ -260,14 +260,38 @@ function recipeCards(recipes) {
   `).join("")}</div>`;
 }
 
+function recipeSections(recipes, filter = "All") {
+  if (filter !== "All") return recipeCards(recipes);
+  const templates = recipes.filter((recipe) => recipe.status === "Template");
+  const drafts = recipes.filter((recipe) => recipe.status === "Draft");
+  const published = recipes.filter((recipe) => recipe.status === "Published");
+  return `
+    <section class="recipe-list-section">
+      <h2>Templates</h2>
+      ${recipeCards(templates)}
+    </section>
+    <section class="recipe-list-section">
+      <h2>Draft Recipes</h2>
+      ${recipeCards(drafts)}
+    </section>
+    <section class="recipe-list-section">
+      <h2>Published Recipes</h2>
+      ${recipeCards(published)}
+    </section>
+  `;
+}
+
 async function renderDashboard(filter = "All") {
-  state.view = filter === "Draft" ? "drafts" : filter === "Archived" ? "archived" : "dashboard";
-  const pageName = filter === "Draft" ? "Draft Recipes" : filter === "Archived" ? "Archived Recipes" : "Dashboard";
+  state.view = filter === "Template" ? "templates" : filter === "Draft" ? "drafts" : filter === "Archived" ? "archived" : "dashboard";
+  const pageName = filter === "Template" ? "Templates" : filter === "Draft" ? "Draft Recipes" : filter === "Archived" ? "Archived Recipes" : "Dashboard";
   const pageHelp = filter === "Archived"
     ? "Archived recipes are kept out of active production views but can still be opened or deleted."
+    : filter === "Template"
+      ? "Template recipes stay formula-locked and can be duplicated into production drafts."
     : "Search and manage recipe drafts, published formulas, and archived records.";
   setPage(pageName, pageHelp);
   await loadRecipes(filter === "All" ? {} : { status: filter });
+  const visibleRecipes = filter === "All" ? state.recipes.filter((recipe) => recipe.status !== "Archived") : state.recipes;
   content.innerHTML = `
     <section class="section">
       <div class="toolbar">
@@ -277,18 +301,20 @@ async function renderDashboard(filter = "All") {
           </label>
           <label>Status
             <select id="statusFilter">
-              ${["All", "Draft", "Published", "Archived"].map((item) => `<option ${item === filter ? "selected" : ""}>${item}</option>`).join("")}
+              ${["All", "Template", "Draft", "Published", "Archived"].map((item) => `<option ${item === filter ? "selected" : ""}>${item}</option>`).join("")}
             </select>
           </label>
         </div>
       </div>
-      ${filter === "All" ? renderDashboardMiniCalendar(state.recipes) : ""}
-      <div id="recipeList">${recipeCards(state.recipes)}</div>
+      ${filter === "All" ? renderDashboardMiniCalendar(visibleRecipes) : ""}
+      <div id="recipeList">${recipeSections(visibleRecipes, filter)}</div>
     </section>
   `;
   content.querySelector("#searchInput").addEventListener("input", async (event) => {
     await loadRecipes({ q: event.target.value, status: content.querySelector("#statusFilter").value });
-    content.querySelector("#recipeList").innerHTML = recipeCards(state.recipes);
+    const currentFilter = content.querySelector("#statusFilter").value;
+    const nextVisibleRecipes = currentFilter === "All" ? state.recipes.filter((recipe) => recipe.status !== "Archived") : state.recipes;
+    content.querySelector("#recipeList").innerHTML = recipeSections(nextVisibleRecipes, currentFilter);
     bindRecipeListButtons();
   });
   content.querySelector("#statusFilter").addEventListener("change", (event) => renderDashboard(event.target.value));
@@ -392,7 +418,8 @@ async function renderEditor(id, recipe = null, mode = null) {
   const r = state.currentRecipe;
   const publishedView = state.editorMode === "published-view";
   const publishedEdit = state.editorMode === "published-edit";
-  const formulaLocked = publishedEdit || Boolean(r.copy_lock_formula);
+  const templateRecipe = r.status === "Template";
+  const formulaLocked = publishedEdit || templateRecipe || Boolean(r.copy_lock_formula);
   setPage(r.name, publishedView ? "Published recipe card is locked. Select Edit to change allowed production fields." : "Edit recipe fields and calculated batch quantities.");
   content.innerHTML = `
     <section class="section">
@@ -401,7 +428,7 @@ async function renderEditor(id, recipe = null, mode = null) {
         <div class="toolbar">
           ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">Save Draft</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
           ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
-          ${r.id && !publishedView ? '<button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
+          ${r.id && !publishedView ? '<button id="makeTemplate">Make Template</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
         </div>
       </div>
       <div class="grid">
@@ -417,14 +444,14 @@ async function renderEditor(id, recipe = null, mode = null) {
         ${field("target_mg_per_unit", "Target active mg per unit", r.target_mg_per_unit, "Desired active dose in each stick, gummy, or piece.", "number", publishedView)}
         ${field("potency_percent", "Active concentration / potency %", r.potency_percent, "Enter 81.2 for 81.2%, or 0.812 if copied from a spreadsheet.", "number", publishedView)}
       </div>
-      ${r.copy_lock_formula ? '<div class="warning">This is a locked formula copy. Formula quantity, formula percent, and batch quantity are locked and will publish with the copied version number.</div>' : ""}
+      ${formulaLocked ? '<div class="warning">This recipe formula is locked. Formula quantity, formula percent, and batch quantity are not directly editable, but recalculations can still update them.</div>' : ""}
     </section>
     ${renderMetrics(r)}
     ${renderActiveAdditiveTool(r, publishedView || publishedEdit)}
     <section class="section">
       <div class="section-header">
         <h2>Ingredients</h2>
-        ${publishedView || publishedEdit || r.copy_lock_formula ? "" : '<button id="addIngredient">Add Ingredient</button>'}
+        ${publishedView || publishedEdit || formulaLocked ? "" : '<button id="addIngredient">Add Ingredient</button>'}
       </div>
       <div class="table-wrap">
         <table class="ingredient-table">
@@ -706,7 +733,7 @@ function renderIngredientRows() {
   const tbody = content.querySelector("#ingredientRows");
   tbody.innerHTML = "";
   const readOnlyRecipe = state.editorMode === "published-view";
-  const formulaLocked = state.editorMode === "published-edit" || Boolean(state.currentRecipe.copy_lock_formula);
+  const formulaLocked = state.editorMode === "published-edit" || state.currentRecipe.status === "Template" || Boolean(state.currentRecipe.copy_lock_formula);
   (state.currentRecipe.ingredients || []).forEach((item, index) => {
     const row = document.querySelector("#recipeRowTemplate").content.firstElementChild.cloneNode(true);
     row.dataset.index = index;
@@ -870,7 +897,7 @@ function bindEditor() {
     const saved = payload.id
       ? await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload })
       : await api("/api/recipes", { method: "POST", body: payload });
-    showToast("Draft saved.");
+    showToast(payload.status === "Template" ? "Template saved." : "Draft saved.");
     renderEditor(saved.id);
   });
   content.querySelector("#recalculate")?.addEventListener("click", async () => {
@@ -893,6 +920,16 @@ function bindEditor() {
     const copy = await api(`/api/recipes/${state.currentRecipe.id}/duplicate-new`, { method: "POST", body: {} });
     showToast("Started a new recipe from duplicate.");
     renderEditor(copy.id);
+  });
+  content.querySelector("#makeTemplate")?.addEventListener("click", async () => {
+    const payload = collectRecipe();
+    payload.status = "Template";
+    payload.copy_lock_formula = true;
+    const saved = payload.id
+      ? await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload })
+      : await api("/api/recipes", { method: "POST", body: payload });
+    showToast("Recipe saved as a template.");
+    renderEditor(saved.id);
   });
   content.querySelector("#publishRecipe")?.addEventListener("click", async () => {
     const payload = collectRecipe();

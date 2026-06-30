@@ -383,6 +383,11 @@ input[readonly] {
   color: var(--green);
 }
 
+.badge.Template {
+  background: #f0edff;
+  color: #6043b6;
+}
+
 .badge.Archived {
   background: #f7ecec;
   color: var(--red);
