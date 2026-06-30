@@ -57,6 +57,76 @@ function activeIngredientIndex(ingredients = []) {
   return index >= 0 ? index : "";
 }
 
+function additiveIdFromLabel(label) {
+  const value = key(label);
+  const numbered = value.match(/additive\s*#?\s*(\d+)/);
+  if (numbered) return `additive-${numbered[1]}`;
+  if (value.includes("mushroom")) return "mushroom";
+  if (value.includes("additive")) return "additive-1";
+  return value.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "additive-1";
+}
+
+function additiveSortValue(id) {
+  const match = String(id).match(/(\d+)/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function isGenericAdditivePlaceholder(name) {
+  return /^(additive(?:\s*#?\s*\d+)?|mushroom additive)$/i.test(clean(name));
+}
+
+function nextValue(row, index) {
+  for (let i = index + 1; i < row.length; i += 1) {
+    if (clean(row[i]) !== "") return row[i];
+  }
+  return "";
+}
+
+function extractAdditiveInputs(rows = [], ingredients = []) {
+  const entries = new Map();
+  const ensure = (label) => {
+    const id = additiveIdFromLabel(label);
+    if (!entries.has(id)) entries.set(id, { id, label: clean(label) });
+    return entries.get(id);
+  };
+
+  rows.forEach((row) => {
+    row.forEach((cell, index) => {
+      const label = clean(cell);
+      if (!label) return;
+      const potencyMatch = label.match(/% potency of (.+)$/i);
+      if (potencyMatch) {
+        ensure(potencyMatch[1]).potency_percent = nextValue(row, index);
+      }
+      const goalMatch = label.match(/(.+?)\s*goal\s*\(mg\)\s*per\s*(?:gummy|unit)/i);
+      if (goalMatch) {
+        ensure(goalMatch[1]).target_mg_per_unit = number(nextValue(row, index));
+      }
+    });
+  });
+
+  const ingredientById = new Map();
+  ingredients.forEach((ingredient, index) => {
+    const id = additiveIdFromLabel(ingredient.ingredient_name);
+    if (!ingredientById.has(id)) ingredientById.set(id, index);
+  });
+
+  return Array.from(entries.values())
+    .map((entry) => {
+      const ingredientIndex = ingredientById.has(entry.id) ? ingredientById.get(entry.id) : "";
+      const ingredient = ingredientIndex === "" ? null : ingredients[ingredientIndex];
+      return {
+        id: `imported-${entry.id}`,
+        ingredient_name: ingredient?.ingredient_name || entry.label || "Additive",
+        ingredient_index: ingredientIndex,
+        target_mg_per_unit: number(entry.target_mg_per_unit),
+        potency_percent: entry.potency_percent || ""
+      };
+    })
+    .filter((entry) => number(entry.target_mg_per_unit) > 0 || number(ingredients[entry.ingredient_index]?.batch_qty) > 0)
+    .sort((a, b) => additiveSortValue(a.id) - additiveSortValue(b.id));
+}
+
 function importedActiveAdditives(ingredients = [], targetMg = "", potencyPercent = "") {
   if (!number(targetMg) && !number(potencyPercent)) return [];
   const ingredientIndex = activeIngredientIndex(ingredients);
@@ -209,12 +279,15 @@ function parseGummySheet(workbook, sheetName) {
     unit_weight_unit: "grams",
     target_mg_per_unit: target,
     potency_percent: potency,
-    active_additives: importedActiveAdditives(ingredients, target, potency),
+    active_additives: extractAdditiveInputs(rows, ingredients),
     ingredients,
     steps,
     notes: [`Imported variant from sheet: ${sheetName}`],
     calculations: {}
   };
+  if (!recipe.active_additives.length) {
+    recipe.active_additives = importedActiveAdditives(ingredients, target, potency);
+  }
   recipe.calculations = calculateRecipe(recipe, ingredients);
   recipe.ingredients = recipe.calculations.ingredients;
   return recipe;
@@ -240,6 +313,16 @@ function parseWorkbook(buffer, inventoryNames = []) {
       : [];
   const matchedRecipes = inventoryNames.length ? applyIngredientMatches(recipes, inventoryNames) : recipes;
   matchedRecipes.forEach((recipe) => {
+    (recipe.ingredients || []).forEach((ingredient) => {
+      if (!isGenericAdditivePlaceholder(ingredient.original_ingredient_name)) return;
+      ingredient.ingredient_name = ingredient.original_ingredient_name;
+      ingredient.match_status = "review";
+      ingredient.match_confidence = 0;
+    });
+    (recipe.active_additives || []).forEach((additive) => {
+      const ingredient = recipe.ingredients[Number(additive.ingredient_index)];
+      if (ingredient) additive.ingredient_name = ingredient.ingredient_name || additive.ingredient_name || "";
+    });
     recipe.calculations = calculateRecipe(recipe, recipe.ingredients);
     recipe.ingredients = recipe.calculations.ingredients;
   });
