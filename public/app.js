@@ -186,6 +186,26 @@ function masterIngredientByName(name) {
   return state.ingredientsMaster.find((item) => item.ingredient_name.toLowerCase() === normalized);
 }
 
+function ingredientNameOptions(value = "") {
+  const current = String(value || "").trim();
+  const hasCurrent = !current || state.ingredientsMaster.some((item) => item.ingredient_name === current);
+  const currentOption = hasCurrent ? "" : `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)} (not in master list)</option>`;
+  return `
+    <option value="" ${current ? "" : "selected"}></option>
+    ${currentOption}
+    ${state.ingredientsMaster.map((item) => {
+      const conversion = Number(item.grams_conversion || item.default_grams_conversion || 0);
+      const details = [
+        item.ingredient_type,
+        item.unit_of_measure,
+        conversion > 0 ? `${qty(conversion)}g` : ""
+      ].filter(Boolean).join(" - ");
+      const selected = item.ingredient_name === current ? " selected" : "";
+      return `<option value="${escapeHtml(item.ingredient_name)}"${selected}>${escapeHtml(details ? `${item.ingredient_name} (${details})` : item.ingredient_name)}</option>`;
+    }).join("")}
+  `;
+}
+
 function typeOptions(value = "") {
   return ["", "SB", "Hijnx", "Hijnx/Topicals", "Topicals"].map((option) => (
     `<option value="${option}" ${option === value ? "selected" : ""}>${option}</option>`
@@ -430,7 +450,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
           </select>
         </label>
         <label>Add additive ingredient
-          <input id="activeIngredientName" list="ingredientOptions" value="${escapeHtml(selectedName)}" ${locked ? "readonly" : ""}>
+          <select id="activeIngredientName" ${locked ? "disabled" : ""}>${ingredientNameOptions(selectedName)}</select>
         </label>
       </div>
       <div class="toolbar active-tool-actions">
@@ -555,9 +575,11 @@ function renderIngredientRows() {
     row.dataset.index = index;
     if (item.match_status === "review") row.classList.add("match-review");
     row.querySelectorAll("input, select").forEach((input) => {
+      if (input.dataset.field === "ingredient_name") {
+        input.innerHTML = ingredientNameOptions(item.ingredient_name);
+      }
       input.value = item[input.dataset.field] ?? "";
       if (input.dataset.field === "ingredient_name") {
-        input.setAttribute("list", "ingredientOptions");
         input.title = item.original_ingredient_name && item.original_ingredient_name !== item.ingredient_name
           ? `Imported as "${item.original_ingredient_name}". Review this best guess.`
           : "";
@@ -814,7 +836,7 @@ function renderImportPreview() {
                     <tr class="${item.match_status === "review" ? "match-review" : ""}">
                       <td><select data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="ingredient_type">${typeOptions(item.ingredient_type || "")}</select></td>
                       <td>
-                        <input list="ingredientOptions" data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="ingredient_name" value="${escapeHtml(item.ingredient_name || "")}">
+                        <select data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="ingredient_name">${ingredientNameOptions(item.ingredient_name || "")}</select>
                         ${item.match_status === "review" ? `<div class="match-alert">Review match. Imported as "${escapeHtml(item.original_ingredient_name || "")}".</div>` : ""}
                       </td>
                       <td><input type="number" step="any" data-import-ingredient="${index}" data-ingredient-index="${ingredientIndex}" data-ingredient-field="formula_percent" value="${item.formula_percent || 0}"></td>
