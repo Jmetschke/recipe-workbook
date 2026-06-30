@@ -254,39 +254,40 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
   }
 }
 
-function formulaBasisTotal(ingredients, excludeIndex = -1, totalBatchGrams = 0) {
-  const total = ingredients.reduce((sum, item, index) => (
-    index === excludeIndex ? sum : sum + Number(item.formula_qty || 0)
-  ), 0);
-  return total > 0 ? total : Number(totalBatchGrams || 0);
-}
-
-function applyBatchQuantityToIngredient(ingredients, index, batchQty, totalBatchGrams) {
-  const ingredient = ingredients[index];
-  if (!ingredient) return;
-  const percent = totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0;
-  const otherQtyTotal = formulaBasisTotal(ingredients, index, totalBatchGrams);
-  const formulaQty = percent >= 1
-    ? otherQtyTotal
-    : otherQtyTotal > 0
-      ? (percent * otherQtyTotal) / Math.max(1 - percent, 0.000001)
-      : batchQty;
-  ingredient.formula_percent = percent;
-  ingredient.formula_qty = formulaQty;
-  ingredient.batch_qty = batchQty;
-  ingredient.unit = ingredient.unit || "grams";
-  ingredient.notes = ingredient.notes || "Active/additive calculated from target dose and potency.";
-}
-
 async function calculateWithActiveMatches(recipe, ingredients) {
   const settings = await allSettings();
   const firstPass = calculateRecipe(recipe, ingredients, settings);
   const nextIngredients = firstPass.ingredients.map((item) => ({ ...item }));
+  const totalBatchGrams = Number(firstPass.total_batch_grams || 0);
+  if (totalBatchGrams <= 0) return firstPass;
+  const fixedByIndex = new Map();
   for (const additive of firstPass.active_additives || []) {
     const index = Number(additive.ingredient_index);
     if (!Number.isFinite(index) || !nextIngredients[index]) continue;
-    applyBatchQuantityToIngredient(nextIngredients, index, Number(additive.calculated_grams || 0), Number(firstPass.total_batch_grams || 0));
+    fixedByIndex.set(index, Number(fixedByIndex.get(index) || 0) + Number(additive.calculated_grams || 0));
   }
+  if (!fixedByIndex.size) return firstPass;
+
+  const fixedTotal = Array.from(fixedByIndex.values()).reduce((sum, value) => sum + Number(value || 0), 0);
+  const remainingBatch = Math.max(totalBatchGrams - fixedTotal, 0);
+  const adjustableIndexes = nextIngredients.map((_, index) => index).filter((index) => !fixedByIndex.has(index));
+  const basisTotal = adjustableIndexes.reduce((sum, index) => sum + Number(nextIngredients[index].formula_qty || 0), 0);
+  const equalShare = adjustableIndexes.length ? remainingBatch / adjustableIndexes.length : 0;
+
+  nextIngredients.forEach((ingredient, index) => {
+    const batchQty = fixedByIndex.has(index)
+      ? Number(fixedByIndex.get(index) || 0)
+      : basisTotal > 0
+        ? remainingBatch * (Number(ingredient.formula_qty || 0) / basisTotal)
+        : equalShare;
+    ingredient.batch_qty = batchQty;
+    ingredient.formula_qty = batchQty;
+    ingredient.formula_percent = totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0;
+    ingredient.unit = ingredient.unit || "grams";
+    if (fixedByIndex.has(index)) {
+      ingredient.notes = ingredient.notes || "Active/additive calculated from target dose and potency.";
+    }
+  });
   return calculateRecipe({ ...recipe, active_additives: firstPass.active_additives }, nextIngredients, settings);
 }
 

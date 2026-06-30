@@ -696,40 +696,39 @@ function refreshCalculationDisplay(updateRows = false) {
   });
 }
 
-function formulaBasisTotal(excludeIndex = -1) {
-  const total = (state.currentRecipe.ingredients || []).reduce((sum, item, index) => (
-    index === excludeIndex ? sum : sum + numeric(item.formula_qty)
-  ), 0);
-  return total > 0 ? total : numeric(state.currentRecipe.calculations?.total_batch_grams || state.currentRecipe.batch_size);
-}
-
-function applyBatchQuantityToIngredient(index, batchQty) {
-  const ingredient = state.currentRecipe.ingredients[index];
-  if (!ingredient) return;
-  const totalBatchGrams = numeric(state.currentRecipe.calculations?.total_batch_grams || state.currentRecipe.batch_size);
-  const percent = totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0;
-  const otherQtyTotal = formulaBasisTotal(index);
-  const formulaQty = percent >= 1
-    ? otherQtyTotal
-    : otherQtyTotal > 0
-      ? (percent * otherQtyTotal) / Math.max(1 - percent, 0.000001)
-      : batchQty;
-  ingredient.formula_percent = percent;
-  ingredient.formula_qty = formulaQty;
-  ingredient.batch_qty = batchQty;
-  ingredient.unit = ingredient.unit || "grams";
-  ingredient.notes = ingredient.notes || "Active/additive calculated from target dose and potency.";
-}
-
 function applyAdditiveCalculationsToMatches() {
-  let applied = 0;
+  const ingredients = state.currentRecipe.ingredients || [];
+  const totalBatchGrams = numeric(state.currentRecipe.calculations?.total_batch_grams || state.currentRecipe.batch_size);
+  if (!ingredients.length || totalBatchGrams <= 0) return 0;
+  const fixedByIndex = new Map();
   for (const additive of state.currentRecipe.active_additives || []) {
     const index = Number(additive.ingredient_index);
-    if (!Number.isFinite(index) || !state.currentRecipe.ingredients[index]) continue;
-    applyBatchQuantityToIngredient(index, additiveRowAmount(additive, state.currentRecipe.calculations));
-    applied += 1;
+    if (!Number.isFinite(index) || !ingredients[index]) continue;
+    fixedByIndex.set(index, numeric(fixedByIndex.get(index)) + additiveRowAmount(additive, state.currentRecipe.calculations));
   }
-  return applied;
+  if (!fixedByIndex.size) return 0;
+
+  const fixedTotal = Array.from(fixedByIndex.values()).reduce((sum, value) => sum + numeric(value), 0);
+  const remainingBatch = Math.max(totalBatchGrams - fixedTotal, 0);
+  const adjustableIndexes = ingredients.map((_, index) => index).filter((index) => !fixedByIndex.has(index));
+  const basisTotal = adjustableIndexes.reduce((sum, index) => sum + numeric(ingredients[index].formula_qty), 0);
+  const equalShare = adjustableIndexes.length ? remainingBatch / adjustableIndexes.length : 0;
+
+  ingredients.forEach((ingredient, index) => {
+    const batchQty = fixedByIndex.has(index)
+      ? numeric(fixedByIndex.get(index))
+      : basisTotal > 0
+        ? remainingBatch * (numeric(ingredient.formula_qty) / basisTotal)
+        : equalShare;
+    ingredient.batch_qty = batchQty;
+    ingredient.formula_qty = batchQty;
+    ingredient.formula_percent = totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0;
+    ingredient.unit = ingredient.unit || "grams";
+    if (fixedByIndex.has(index)) {
+      ingredient.notes = ingredient.notes || "Active/additive calculated from target dose and potency.";
+    }
+  });
+  return fixedByIndex.size;
 }
 
 function bindActiveAdditiveTool() {
