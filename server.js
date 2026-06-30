@@ -126,19 +126,23 @@ app.get("/api/ingredients", asyncRoute(async (req, res) => {
 }));
 
 app.post("/api/ingredients", asyncRoute(async (req, res) => {
+  if (!req.body.ingredient_name || !String(req.body.ingredient_name).trim()) {
+    return res.status(400).json({ error: "Ingredient name is required." });
+  }
   await upsertMasterIngredients([{
-    ingredient_name: req.body.ingredient_name,
+    ingredient_name: String(req.body.ingredient_name).trim(),
     ingredient_type: req.body.ingredient_type,
     description: req.body.description,
-    unit: req.body.default_unit,
-    vendor: req.body.default_vendor,
-    cost_per_unit: req.body.default_cost,
+    default_unit: req.body.default_unit,
+    default_vendor: req.body.default_vendor,
+    default_cost: req.body.default_cost,
     unit_of_measure: req.body.unit_of_measure,
     grams_conversion: req.body.grams_conversion,
-    gram_conversion: req.body.default_grams_conversion,
+    default_grams_conversion: req.body.default_grams_conversion,
+    source: req.body.source || "Manual Entry",
     notes: req.body.notes
   }]);
-  res.status(201).json(await getIngredient(req.body.ingredient_name));
+  return res.status(201).json(await getIngredient(String(req.body.ingredient_name).trim()));
 }));
 
 app.get("/api/settings", asyncRoute(async (req, res) => {

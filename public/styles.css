@@ -149,6 +149,10 @@ label {
   font-weight: 700;
 }
 
+.full-field {
+  margin-top: 14px;
+}
+
 .helper {
   color: var(--muted);
   font-size: 12px;
