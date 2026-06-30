@@ -347,8 +347,9 @@ input[readonly] {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 14px;
+  min-width: 0;
 }
 
 .recipe-card,
@@ -370,23 +371,43 @@ input[readonly] {
   overflow-wrap: anywhere;
 }
 
+.recipe-card p {
+  overflow-wrap: anywhere;
+}
+
 .recipe-card .card-header {
   align-items: flex-start;
+}
+
+.recipe-card .badge {
+  flex: 0 0 auto;
 }
 
 .recipe-card .toolbar {
   justify-content: flex-start;
   flex-wrap: wrap;
+  align-items: stretch;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 14px;
   margin-bottom: 0;
 }
 
 .recipe-card .toolbar button {
-  max-width: 100%;
+  flex: 0 1 auto;
+  max-width: 150px;
+  min-height: 38px;
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.15;
+}
+
+.recipe-list-section {
+  min-width: 0;
+  margin-top: 18px;
+}
+
+.recipe-list-section:first-child {
+  margin-top: 0;
 }
 
 .badge {
