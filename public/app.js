@@ -962,11 +962,10 @@ function bindEditor() {
   });
   content.querySelector("#saveRecipe")?.addEventListener("click", async () => {
     const payload = collectRecipe();
-    const saved = payload.id
-      ? await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload })
-      : await api("/api/recipes", { method: "POST", body: payload });
+    if (payload.id) await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
+    else await api("/api/recipes", { method: "POST", body: payload });
     showToast(payload.status === "Template" ? "Template saved." : "Draft saved.");
-    renderEditor(saved.id);
+    renderDashboard();
   });
   content.querySelector("#recalculate")?.addEventListener("click", async () => {
     const payload = collectRecipe();
@@ -993,11 +992,10 @@ function bindEditor() {
     const payload = collectRecipe();
     payload.status = "Template";
     payload.copy_lock_formula = true;
-    const saved = payload.id
-      ? await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload })
-      : await api("/api/recipes", { method: "POST", body: payload });
+    if (payload.id) await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
+    else await api("/api/recipes", { method: "POST", body: payload });
     showToast("Recipe saved as a template.");
-    renderEditor(saved.id);
+    renderDashboard();
   });
   content.querySelector("#publishRecipe")?.addEventListener("click", async () => {
     const payload = collectRecipe();
@@ -1009,7 +1007,7 @@ function bindEditor() {
     const publishedBy = window.prompt("Published by", "Production") || "Production";
     const published = await api(`/api/recipes/${saved.id}/publish`, { method: "POST", body: { published_by: publishedBy } });
     showToast(`Published ${published.current_version}.`);
-    renderEditor(published.id);
+    renderDashboard();
   });
   content.querySelector("#archiveRecipe")?.addEventListener("click", async () => {
     await api(`/api/recipes/${state.currentRecipe.id}/archive`, { method: "PATCH", body: {} });
