@@ -39,6 +39,7 @@ async function migrate() {
       name TEXT NOT NULL,
       product_type TEXT DEFAULT '',
       flavor TEXT DEFAULT '',
+      recipe_card_type TEXT DEFAULT 'Edible/Topical',
       status TEXT NOT NULL DEFAULT 'Draft',
       current_version TEXT DEFAULT '',
       has_unpublished_changes INTEGER DEFAULT 0,
@@ -139,6 +140,7 @@ async function migrate() {
   await addColumnIfMissing("ingredients_master", "grams_conversion", "REAL DEFAULT 1");
   await addColumnIfMissing("ingredients_master", "default_grams_conversion", "REAL DEFAULT 1");
   await addColumnIfMissing("recipes", "expected_production_date", "TEXT DEFAULT ''");
+  await addColumnIfMissing("recipes", "recipe_card_type", "TEXT DEFAULT 'Edible/Topical'");
   await addColumnIfMissing("recipes", "batch_size_mode", "TEXT DEFAULT 'grams'");
   await addColumnIfMissing("recipes", "copied_from_recipe_id", "INTEGER");
   await addColumnIfMissing("recipes", "copy_lock_formula", "INTEGER DEFAULT 0");
@@ -257,6 +259,7 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
 async function calculateWithActiveMatches(recipe, ingredients) {
   const settings = await allSettings();
   const firstPass = calculateRecipe(recipe, ingredients, settings);
+  if (recipe.recipe_card_type === "Vape") return firstPass;
   const nextIngredients = firstPass.ingredients.map((item) => ({ ...item }));
   const totalBatchGrams = Number(firstPass.total_batch_grams || 0);
   if (totalBatchGrams <= 0) return firstPass;
@@ -295,20 +298,21 @@ async function createRecipe(input) {
   const calculations = await calculateWithActiveMatches(input, input.ingredients || []);
   const info = await execute(
     `INSERT INTO recipes (
-      name, product_type, flavor, status, current_version, has_unpublished_changes, batch_size, batch_size_mode, batch_unit,
+      name, product_type, flavor, recipe_card_type, status, current_version, has_unpublished_changes, batch_size, batch_size_mode, batch_unit,
       unit_weight, unit_weight_unit, target_mg_per_unit, potency_percent, expected_production_date,
       copied_from_recipe_id, copy_lock_formula, is_new_recipe_duplicate, active_additives, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name || "Untitled Recipe",
       input.product_type || "",
       input.flavor || "",
+      input.recipe_card_type === "Vape" ? "Vape" : "Edible/Topical",
       writableRecipeStatus(input.status),
       input.current_version || "",
       input.has_unpublished_changes ? 1 : 0,
       input.batch_size || 0,
-      input.batch_size_mode === "units" ? "units" : "grams",
-      "grams",
+      input.recipe_card_type === "Vape" ? "liters" : input.batch_size_mode === "units" ? "units" : "grams",
+      input.recipe_card_type === "Vape" ? "L" : "grams",
       input.unit_weight || 0,
       input.unit_weight_unit || "grams",
       input.target_mg_per_unit || 0,
@@ -344,7 +348,7 @@ async function updateRecipe(id, input) {
   const publishedDirty = existing.status === "Published" || existing.current_version;
   await execute(
     `UPDATE recipes SET
-      name = ?, product_type = ?, flavor = ?, status = ?, current_version = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
+      name = ?, product_type = ?, flavor = ?, recipe_card_type = ?, status = ?, current_version = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
       unit_weight = ?, unit_weight_unit = ?, target_mg_per_unit = ?, potency_percent = ?, expected_production_date = ?,
       copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, active_additives = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
@@ -352,12 +356,13 @@ async function updateRecipe(id, input) {
       next.name || "Untitled Recipe",
       next.product_type || "",
       next.flavor || "",
+      next.recipe_card_type === "Vape" ? "Vape" : "Edible/Topical",
       writableRecipeStatus(next.status),
       next.current_version || "",
       publishedDirty ? 1 : 0,
       next.batch_size || 0,
-      next.batch_size_mode === "units" ? "units" : "grams",
-      "grams",
+      next.recipe_card_type === "Vape" ? "liters" : next.batch_size_mode === "units" ? "units" : "grams",
+      next.recipe_card_type === "Vape" ? "L" : "grams",
       next.unit_weight || 0,
       next.unit_weight_unit || "grams",
       next.target_mg_per_unit || 0,
