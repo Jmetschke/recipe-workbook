@@ -37,6 +37,16 @@ function valueBesideLabel(rows, label) {
   return "";
 }
 
+function valueImmediatelyBesideLabel(rows, label) {
+  const wanted = key(label);
+  for (const row of rows) {
+    for (let i = 0; i < row.length; i += 1) {
+      if (key(row[i]).includes(wanted)) return clean(row[i + 1]);
+    }
+  }
+  return "";
+}
+
 function splitTitle(title) {
   const cleaned = clean(title);
   const [left = cleaned] = cleaned.split(" - ");
@@ -139,6 +149,111 @@ function importedActiveAdditives(ingredients = [], targetMg = "", potencyPercent
   }];
 }
 
+function findShooterDoseRows(rows = []) {
+  const headerIndex = rows.findIndex((row) => {
+    const text = row.map(key).join(" | ");
+    return text.includes("# of units") && text.includes("g's per unit") && text.includes("mg/g");
+  });
+  if (headerIndex < 0) return null;
+  return {
+    headerIndex,
+    header: rows[headerIndex] || [],
+    values: rows[headerIndex + 1] || []
+  };
+}
+
+function parseShooterWorkbook(workbook) {
+  const recipeSheet = workbook.SheetNames.find((name) => key(name) === "recipe") || workbook.SheetNames[0];
+  const rows = readSheet(workbook, recipeSheet);
+  const headerIndex = findRow(rows, ["trade name", "formula", "batch"]);
+  const header = rows[headerIndex] || [];
+  const col = (contains) => header.findIndex((cell) => key(cell).includes(contains));
+  const nameCol = col("trade name");
+  const descriptionCol = col("description");
+  const formulaCol = col("formula");
+  const percentCol = col("qty %");
+  const batchCol = col("batch");
+  const actualCol = col("actual");
+  const vendorCol = col("vendor");
+  const doseRows = findShooterDoseRows(rows);
+  const dose = doseRows?.values || [];
+  const targetQty = number(valueBesideLabel(rows, "Target QTY"));
+  const unitCount = number(dose[0]);
+  const gramsPerUnit = number(dose[1]);
+  const totalBatch = number(dose[2]) || targetQty;
+  const activeLabel = clean(dose[3]);
+  const mgPerUnit = number(dose[4]);
+  const formulaTotalMg = number(dose[5]);
+  const mgPerG = number(dose[6]);
+  const importedConcentrateGrams = number(dose[7]);
+  const ingredients = [];
+
+  for (let i = headerIndex + 1; i < rows.length; i += 1) {
+    const row = rows[i];
+    const ingredientName = clean(row[nameCol]);
+    if (!ingredientName) continue;
+    if (/^# of units|only change|bright yellow|frmla total|water calculation|total/i.test(ingredientName)) break;
+    ingredients.push({
+      sort_order: ingredients.length + 1,
+      ingredient_name: ingredientName,
+      description: descriptionCol >= 0 ? clean(row[descriptionCol]) : "",
+      formula_qty: number(row[formulaCol]),
+      formula_percent: normalizePercent(row[percentCol]),
+      batch_qty: number(row[batchCol]),
+      unit: "grams",
+      vendor: vendorCol >= 0 ? clean(row[vendorCol]) : "",
+      notes: actualCol >= 0 && clean(row[actualCol]) ? `Actual qty: ${clean(row[actualCol])}` : ""
+    });
+  }
+
+  const activeIndexByExactQty = importedConcentrateGrams
+    ? ingredients.findIndex((item) => Math.abs(number(item.formula_qty) - importedConcentrateGrams) < 0.0001)
+    : -1;
+  const rowEightName = clean(rows[7]?.[nameCol]);
+  const activeIndexByRowEight = rowEightName ? ingredients.findIndex((item) => key(item.ingredient_name) === key(rowEightName)) : -1;
+  const activeIndex = activeIndexByExactQty >= 0 ? activeIndexByExactQty : activeIndexByRowEight >= 0 ? activeIndexByRowEight : activeIngredientIndex(ingredients);
+  const activeIngredient = activeIndex === "" || activeIndex < 0 ? null : ingredients[activeIndex];
+  const additiveName = activeIngredient?.ingredient_name || rowEightName || activeLabel || "Additive";
+
+  const projectSummary = valueImmediatelyBesideLabel(rows, "Project Summary");
+  const recipe = {
+    name: projectSummary || "Imported Mg/g Concentrate Formula",
+    product_type: "Shooter",
+    flavor: "",
+    batch_size: totalBatch || ingredients.reduce((sum, item) => sum + number(item.batch_qty), 0),
+    batch_size_mode: "grams",
+    batch_unit: "grams",
+    unit_weight: gramsPerUnit || 0,
+    unit_weight_unit: "grams",
+    target_mg_per_unit: 0,
+    potency_percent: 0,
+    active_additives: mgPerG || mgPerUnit ? [{
+      id: `imported-mg-g-${Date.now()}`,
+      ingredient_name: additiveName,
+      ingredient_index: activeIndex === "" || activeIndex < 0 ? "" : String(activeIndex),
+      concentration_type: "mg_per_unit",
+      mg_per_g: mgPerG,
+      mg_per_unit: mgPerUnit,
+      target_mg_per_unit: mgPerUnit,
+      grams_per_unit: gramsPerUnit || "",
+      unit_count: unitCount || "",
+      total_active_mg: formulaTotalMg || ""
+    }] : [],
+    ingredients,
+    steps: [],
+    notes: [
+      "Imported from mg/g concentrate workbook.",
+      formulaTotalMg ? `Workbook formula total mg: ${formulaTotalMg}` : "",
+      importedConcentrateGrams ? `Workbook concentrate grams before recalculation: ${importedConcentrateGrams}` : ""
+    ].filter(Boolean),
+    calculations: {}
+  };
+  recipe.calculations = calculateRecipe(recipe, ingredients);
+  recipe.ingredients = recipe.calculations.ingredients;
+  recipe.active_additives = recipe.calculations.active_additives || recipe.active_additives;
+  return [recipe];
+}
+
 function detectWorkbookFormat(workbook) {
   const sheetNames = workbook.SheetNames.map((name) => name.toLowerCase());
   const joined = sheetNames.join(" | ");
@@ -152,6 +267,9 @@ function detectWorkbookFormat(workbook) {
   for (const name of workbook.SheetNames) {
     const rows = readSheet(workbook, name).slice(0, 35);
     const text = rows.flat().map(key).join(" | ");
+    const extendedRows = readSheet(workbook, name).slice(0, 45);
+    const extendedText = extendedRows.flat().map(key).join(" | ");
+    if (extendedText.includes("# of units") && extendedText.includes("g's per unit") && extendedText.includes("mg/g")) return "mg-per-gram";
     if (text.includes("trade name") && text.includes("formula qty") && text.includes("batch qty")) return "stick-rub";
     if (text.includes("batch size") && text.includes("additive goal") && text.includes("weight of each gummy")) return "gummy";
   }
@@ -310,7 +428,9 @@ function parseWorkbook(buffer, inventoryNames = []) {
     ? parseStickRubWorkbook(workbook)
     : detected_format === "gummy"
       ? parseGummyWorkbook(workbook)
-      : [];
+      : detected_format === "mg-per-gram"
+        ? parseShooterWorkbook(workbook)
+        : [];
   const matchedRecipes = inventoryNames.length ? applyIngredientMatches(recipes, inventoryNames) : recipes;
   matchedRecipes.forEach((recipe) => {
     (recipe.ingredients || []).forEach((ingredient) => {
@@ -325,6 +445,7 @@ function parseWorkbook(buffer, inventoryNames = []) {
     });
     recipe.calculations = calculateRecipe(recipe, recipe.ingredients);
     recipe.ingredients = recipe.calculations.ingredients;
+    recipe.active_additives = recipe.calculations.active_additives || recipe.active_additives;
   });
   return {
     detected_format,
@@ -337,5 +458,6 @@ module.exports = {
   parseWorkbook,
   parseStickRubWorkbook,
   parseGummyWorkbook,
+  parseShooterWorkbook,
   detectWorkbookFormat
 };

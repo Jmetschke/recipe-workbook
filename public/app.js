@@ -80,7 +80,47 @@ function normalizeActiveAdditivesForCalculation(recipe, ingredients = [], estima
       }]
       : [];
 
+  const batchSizeInput = numeric(recipe.batch_size);
+  const unitWeight = numeric(recipe.unit_weight);
+  const batchSizeMode = recipe.batch_size_mode === "units" ? "units" : "grams";
+  const totalBatchGrams = batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
+
   return sourceRows.map((row, index) => {
+    const concentrationType = row.concentration_type === "mg_per_unit" || row.concentration_basis === "mg_per_unit" ? "mg_per_unit" : "percent";
+    if (concentrationType === "mg_per_unit") {
+      const mgPerG = numeric(row.mg_per_g || row.mg_per_gram || row.concentration_mg_per_g);
+      const mgPerUnit = row.mg_per_unit === undefined || row.mg_per_unit === null || row.mg_per_unit === ""
+        ? numeric(row.target_mg_per_unit)
+        : numeric(row.mg_per_unit);
+      const gramsPerUnit = numeric(row.grams_per_unit || row.g_per_unit || unitWeight);
+      const hasExplicitUnits = !(row.unit_count === undefined || row.unit_count === null || row.unit_count === "" || numeric(row.unit_count) <= 0);
+      const explicitUnits = hasExplicitUnits ? numeric(row.unit_count) : 0;
+      const unitCount = explicitUnits || (gramsPerUnit > 0 ? totalBatchGrams / gramsPerUnit : estimatedYield);
+      const totalActiveMg = unitCount > 0 && mgPerUnit > 0 ? unitCount * mgPerUnit : 0;
+      const calculatedGrams = mgPerG > 0 && totalActiveMg > 0 ? totalActiveMg / mgPerG : 0;
+      const physicalGramsPerUnit = unitCount > 0 ? calculatedGrams / unitCount : 0;
+      const physicalMgPerUnit = physicalGramsPerUnit * 1000;
+      return {
+        ...row,
+        id: row.id || `additive-${Date.now()}-${index}`,
+        ingredient_name: row.ingredient_name || "",
+        ingredient_index: row.ingredient_index ?? "",
+        concentration_type: "mg_per_unit",
+        mg_per_g: mgPerG || "",
+        mg_per_unit: mgPerUnit || "",
+        target_mg_per_unit: mgPerUnit || "",
+        grams_per_unit: gramsPerUnit || "",
+        unit_count: hasExplicitUnits ? unitCount : "",
+        calculated_unit_count: unitCount || "",
+        total_active_mg: totalActiveMg,
+        potency_percent: row.potency_percent || "",
+        potency_fraction: 0,
+        physical_mg_per_unit: physicalMgPerUnit,
+        physical_grams_per_unit: physicalGramsPerUnit,
+        calculated_grams: calculatedGrams
+      };
+    }
+
     const oldPercentOfActive = row.percent_of_active === undefined || row.percent_of_active === null || row.percent_of_active === ""
       ? 100
       : numeric(row.percent_of_active, 100);
@@ -99,8 +139,15 @@ function normalizeActiveAdditivesForCalculation(recipe, ingredients = [], estima
       id: row.id || `additive-${Date.now()}-${index}`,
       ingredient_name: row.ingredient_name || "",
       ingredient_index: row.ingredient_index ?? "",
+      concentration_type: "percent",
       target_mg_per_unit: targetMg,
       potency_percent: potencyInput || "",
+      mg_per_unit: row.mg_per_unit || "",
+      mg_per_g: row.mg_per_g || "",
+      grams_per_unit: row.grams_per_unit || "",
+      unit_count: row.unit_count || "",
+      calculated_unit_count: row.unit_count || estimatedYield || "",
+      total_active_mg: targetMg > 0 && estimatedYield > 0 ? targetMg * estimatedYield : 0,
       potency_fraction: potencyFraction,
       physical_mg_per_unit: physicalMgPerUnit,
       physical_grams_per_unit: physicalGramsPerUnit,
@@ -573,8 +620,13 @@ function newAdditiveCalculation(name = "", ingredientIndex = "") {
     id: `additive-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     ingredient_name: name,
     ingredient_index: ingredientIndex,
+    concentration_type: "percent",
     target_mg_per_unit: "",
-    potency_percent: ""
+    potency_percent: "",
+    mg_per_unit: "",
+    mg_per_g: "",
+    grams_per_unit: "",
+    unit_count: ""
   };
 }
 
@@ -606,6 +658,18 @@ function additiveCalculatedRow(row, calculations) {
   return (calculations?.active_additives || []).find((item) => item.id === row.id) || row;
 }
 
+function concentrationTypeOptions(value = "percent") {
+  const selected = value === "mg_per_unit" ? "mg_per_unit" : "percent";
+  return `
+    <option value="percent" ${selected === "percent" ? "selected" : ""}>%</option>
+    <option value="mg_per_unit" ${selected === "mg_per_unit" ? "selected" : ""}>Mg/unit</option>
+  `;
+}
+
+function additiveNumberInput(field, value, locked, disabled = false) {
+  return `<input type="number" step="any" min="0" data-additive-field="${field}" value="${escapeHtml(value ?? "")}" ${locked ? "readonly" : ""} ${disabled ? "disabled" : ""}>`;
+}
+
 function renderActiveAdditiveTool(recipe, locked = false) {
   const c = recipe.calculations || {};
   const additives = ensureActiveAdditives(recipe);
@@ -614,7 +678,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
       <div class="section-header">
         <div>
           <h2>Active / Additive Calculator</h2>
-          <p class="helper">Each additive has its own target mg per unit and potency %. The app calculates physical grams for each row and applies it to the matched recipe ingredient.</p>
+          <p class="helper">Choose % for potency-based concentrates or Mg/unit for concentrates labeled in mg per gram. The calculated grams can be applied to the matched recipe ingredient.</p>
         </div>
       </div>
       <div class="grid">
@@ -628,8 +692,13 @@ function renderActiveAdditiveTool(recipe, locked = false) {
           <thead>
             <tr>
               <th>Additive</th>
+              <th>Basis</th>
               <th>Target mg/unit</th>
               <th>Potency %</th>
+              <th>mg/g concentrate</th>
+              <th>g/unit</th>
+              <th>Units</th>
+              <th>Total mg</th>
               <th>Physical mg/unit</th>
               <th>Calculated grams</th>
               <th>Match to recipe ingredient</th>
@@ -641,10 +710,16 @@ function renderActiveAdditiveTool(recipe, locked = false) {
               <tr data-additive-index="${index}">
                 ${(() => {
                   const calculated = additiveCalculatedRow(row, c);
+                  const type = calculated.concentration_type === "mg_per_unit" ? "mg_per_unit" : "percent";
                   return `
                     <td><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
-                    <td><input type="number" step="any" min="0" data-additive-field="target_mg_per_unit" value="${escapeHtml(row.target_mg_per_unit ?? "")}" ${locked ? "readonly" : ""}></td>
-                    <td><input type="number" step="any" min="0" data-additive-field="potency_percent" value="${escapeHtml(row.potency_percent ?? "")}" ${locked ? "readonly" : ""}></td>
+                    <td><select data-additive-field="concentration_type" ${locked ? "disabled" : ""}>${concentrationTypeOptions(type)}</select></td>
+                    <td>${type === "percent" ? additiveNumberInput("target_mg_per_unit", row.target_mg_per_unit, locked) : additiveNumberInput("mg_per_unit", row.mg_per_unit ?? row.target_mg_per_unit, locked)}</td>
+                    <td>${type === "percent" ? additiveNumberInput("potency_percent", row.potency_percent, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td>${type === "mg_per_unit" ? additiveNumberInput("mg_per_g", row.mg_per_g, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td>${type === "mg_per_unit" ? additiveNumberInput("grams_per_unit", row.grams_per_unit, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td>${type === "mg_per_unit" ? additiveNumberInput("unit_count", row.unit_count, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td><input class="calculated" readonly value="${qty(calculated.total_active_mg)}"></td>
                     <td><input class="calculated" readonly value="${qty(calculated.physical_mg_per_unit)}"></td>
                     <td><input class="calculated" readonly value="${qty(calculated.calculated_grams)}"></td>
                   `;
@@ -652,7 +727,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                 <td><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
                 <td><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
               </tr>
-            `).join("") : '<tr><td colspan="7" class="helper">No additive calculations yet.</td></tr>'}
+            `).join("") : '<tr><td colspan="12" class="helper">No additive calculations yet.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -750,6 +825,9 @@ function bindActiveAdditiveTool() {
           applyMasterIngredientDefaults(ingredient, masterIngredientByName(additive.ingredient_name));
           renderIngredientRows();
         }
+      }
+      if (input.dataset.additiveField === "concentration_type" && additive.concentration_type === "mg_per_unit" && !additive.mg_per_unit) {
+        additive.mg_per_unit = additive.target_mg_per_unit || "";
       }
       applyAdditiveCalculationsToMatches();
       refreshCalculationDisplay(true);
@@ -1067,13 +1145,17 @@ function renderImportPreview() {
           ${(recipe.active_additives || []).length ? `
             <div class="table-wrap active-additive-wrap">
               <table class="active-additive-table">
-                <thead><tr><th>Additive</th><th>Target mg/unit</th><th>Potency %</th><th>Match to recipe ingredient</th></tr></thead>
+                <thead><tr><th>Additive</th><th>Basis</th><th>Target mg/unit</th><th>Potency %</th><th>mg/g concentrate</th><th>g/unit</th><th>Units</th><th>Match to recipe ingredient</th></tr></thead>
                 <tbody>
                   ${(recipe.active_additives || []).map((row, additiveIndex) => `
                     <tr>
                       <td><select data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="ingredient_name">${ingredientNameOptions(row.ingredient_name || "")}</select></td>
-                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="target_mg_per_unit" value="${escapeHtml(row.target_mg_per_unit ?? "")}"></td>
-                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="potency_percent" value="${escapeHtml(row.potency_percent ?? "")}"></td>
+                      <td><select data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="concentration_type">${concentrationTypeOptions(row.concentration_type || "percent")}</select></td>
+                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="${row.concentration_type === "mg_per_unit" ? "mg_per_unit" : "target_mg_per_unit"}" value="${escapeHtml(row.concentration_type === "mg_per_unit" ? row.mg_per_unit ?? row.target_mg_per_unit ?? "" : row.target_mg_per_unit ?? "")}"></td>
+                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="potency_percent" value="${escapeHtml(row.potency_percent ?? "")}" ${row.concentration_type === "mg_per_unit" ? "disabled" : ""}></td>
+                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="mg_per_g" value="${escapeHtml(row.mg_per_g ?? "")}" ${row.concentration_type === "mg_per_unit" ? "" : "disabled"}></td>
+                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="grams_per_unit" value="${escapeHtml(row.grams_per_unit ?? "")}" ${row.concentration_type === "mg_per_unit" ? "" : "disabled"}></td>
+                      <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="unit_count" value="${escapeHtml(row.unit_count ?? "")}" ${row.concentration_type === "mg_per_unit" ? "" : "disabled"}></td>
                       <td><select data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="ingredient_index">${existingImportIngredientOptions(recipe, row.ingredient_index ?? "")}</select></td>
                     </tr>
                   `).join("")}
@@ -1160,6 +1242,12 @@ function renderImportPreview() {
       if (input.dataset.additiveField === "ingredient_index") {
         const ingredient = recipe.ingredients[Number(additive.ingredient_index)];
         if (ingredient) additive.ingredient_name = ingredient.ingredient_name || additive.ingredient_name || "";
+      }
+      if (input.dataset.additiveField === "concentration_type") {
+        if (additive.concentration_type === "mg_per_unit" && !additive.mg_per_unit) {
+          additive.mg_per_unit = additive.target_mg_per_unit || "";
+        }
+        renderImportPreview();
       }
     };
     input.addEventListener("input", updateImportAdditive);

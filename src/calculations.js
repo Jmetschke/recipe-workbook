@@ -18,6 +18,10 @@ function activeIngredientIndex(ingredients = []) {
   return index >= 0 ? index : "";
 }
 
+function additiveConcentrationType(row = {}) {
+  return row.concentration_type === "mg_per_unit" || row.concentration_basis === "mg_per_unit" ? "mg_per_unit" : "percent";
+}
+
 function normalizeActiveAdditives(recipe, ingredients = [], estimatedYield = 0) {
   const rows = Array.isArray(recipe.active_additives) ? recipe.active_additives : [];
   const fallbackTargetMg = number(recipe.target_mg_per_unit);
@@ -33,7 +37,47 @@ function normalizeActiveAdditives(recipe, ingredients = [], estimatedYield = 0) 
       }]
       : [];
 
+  const batchSizeInput = number(recipe.batch_size);
+  const unitWeight = number(recipe.unit_weight);
+  const batchSizeMode = recipe.batch_size_mode === "units" ? "units" : "grams";
+  const totalBatchGrams = batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
+
   return sourceRows.map((row, index) => {
+    const concentrationType = additiveConcentrationType(row);
+    if (concentrationType === "mg_per_unit") {
+      const mgPerG = number(row.mg_per_g || row.mg_per_gram || row.concentration_mg_per_g);
+      const mgPerUnit = row.mg_per_unit === undefined || row.mg_per_unit === null || row.mg_per_unit === ""
+        ? number(row.target_mg_per_unit)
+        : number(row.mg_per_unit);
+      const gramsPerUnit = number(row.grams_per_unit || row.g_per_unit || unitWeight);
+      const hasExplicitUnits = !(row.unit_count === undefined || row.unit_count === null || row.unit_count === "" || number(row.unit_count) <= 0);
+      const explicitUnits = hasExplicitUnits ? number(row.unit_count) : 0;
+      const unitCount = explicitUnits || (gramsPerUnit > 0 ? totalBatchGrams / gramsPerUnit : estimatedYield);
+      const totalActiveMg = unitCount > 0 && mgPerUnit > 0 ? unitCount * mgPerUnit : 0;
+      const totalGrams = mgPerG > 0 && totalActiveMg > 0 ? totalActiveMg / mgPerG : 0;
+      const physicalGramsPerUnit = unitCount > 0 ? totalGrams / unitCount : 0;
+      const physicalMgPerUnit = physicalGramsPerUnit * 1000;
+      return {
+        ...row,
+        id: row.id || `additive-${index + 1}`,
+        ingredient_name: row.ingredient_name || "",
+        ingredient_index: row.ingredient_index ?? "",
+        concentration_type: "mg_per_unit",
+        mg_per_g: mgPerG || "",
+        mg_per_unit: mgPerUnit || "",
+        target_mg_per_unit: mgPerUnit || "",
+        grams_per_unit: gramsPerUnit || "",
+        unit_count: hasExplicitUnits ? unitCount : "",
+        calculated_unit_count: unitCount || "",
+        total_active_mg: totalActiveMg,
+        potency_percent: row.potency_percent || "",
+        potency_fraction: 0,
+        physical_mg_per_unit: physicalMgPerUnit,
+        physical_grams_per_unit: physicalGramsPerUnit,
+        calculated_grams: totalGrams
+      };
+    }
+
     const oldPercentOfActive = row.percent_of_active === undefined || row.percent_of_active === null || row.percent_of_active === ""
       ? 100
       : number(row.percent_of_active, 100);
@@ -51,8 +95,15 @@ function normalizeActiveAdditives(recipe, ingredients = [], estimatedYield = 0) 
       id: row.id || `additive-${index + 1}`,
       ingredient_name: row.ingredient_name || "",
       ingredient_index: row.ingredient_index ?? "",
+      concentration_type: "percent",
       target_mg_per_unit: targetMg,
       potency_percent: row.potency_percent === undefined || row.potency_percent === null || row.potency_percent === "" ? fallbackPotency || "" : row.potency_percent,
+      mg_per_unit: row.mg_per_unit || "",
+      mg_per_g: row.mg_per_g || "",
+      grams_per_unit: row.grams_per_unit || "",
+      unit_count: row.unit_count || "",
+      calculated_unit_count: row.unit_count || estimatedYield || "",
+      total_active_mg: targetMg > 0 && estimatedYield > 0 ? targetMg * estimatedYield : 0,
       potency_fraction: potencyFraction,
       physical_mg_per_unit: physicalMgPerUnit,
       physical_grams_per_unit: physicalGramsPerUnit,

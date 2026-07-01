@@ -223,11 +223,12 @@ function applyIngredientMatches(recipes, inventoryNames = INVENTORY_INGREDIENTS)
     ingredients: (recipe.ingredients || []).map((ingredient) => {
       const original = ingredient.original_ingredient_name || ingredient.ingredient_name || "";
       const match = bestIngredientMatch(original, inventoryNames);
-      const designation = designationForIngredient(match.name);
+      const safeMatchName = match.confidence >= 0.45 ? match.name : original;
+      const designation = designationForIngredient(safeMatchName);
       return {
         ...ingredient,
         original_ingredient_name: original,
-        ingredient_name: match.name || original,
+        ingredient_name: safeMatchName || original,
         ingredient_type: ingredient.ingredient_type || designation?.ingredient_type || "",
         unit: ingredient.unit || "grams",
         match_confidence: Number(match.confidence.toFixed(4)),
