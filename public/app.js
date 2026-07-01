@@ -670,6 +670,11 @@ function additiveNumberInput(field, value, locked, disabled = false) {
   return `<input type="number" step="any" min="0" data-additive-field="${field}" value="${escapeHtml(value ?? "")}" ${locked ? "readonly" : ""} ${disabled ? "disabled" : ""}>`;
 }
 
+function additiveUnitCountValue(row, calculated) {
+  const explicit = row.unit_count === undefined || row.unit_count === null ? "" : row.unit_count;
+  return numeric(explicit) > 0 ? explicit : calculated.calculated_unit_count || "";
+}
+
 function renderActiveAdditiveTool(recipe, locked = false) {
   const c = recipe.calculations || {};
   const additives = ensureActiveAdditives(recipe);
@@ -718,7 +723,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                     <td>${type === "percent" ? additiveNumberInput("potency_percent", row.potency_percent, locked) : '<input class="calculated" readonly value="">'} </td>
                     <td>${type === "mg_per_unit" ? additiveNumberInput("mg_per_g", row.mg_per_g, locked) : '<input class="calculated" readonly value="">'} </td>
                     <td>${type === "mg_per_unit" ? additiveNumberInput("grams_per_unit", row.grams_per_unit, locked) : '<input class="calculated" readonly value="">'} </td>
-                    <td>${type === "mg_per_unit" ? additiveNumberInput("unit_count", row.unit_count, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td>${type === "mg_per_unit" ? additiveNumberInput("unit_count", additiveUnitCountValue(row, calculated), locked) : '<input class="calculated" readonly value="">'} </td>
                     <td><input class="calculated" readonly value="${qty(calculated.total_active_mg)}"></td>
                     <td><input class="calculated" readonly value="${qty(calculated.physical_mg_per_unit)}"></td>
                     <td><input class="calculated" readonly value="${qty(calculated.calculated_grams)}"></td>
