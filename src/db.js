@@ -48,6 +48,7 @@ async function migrate() {
       batch_unit TEXT DEFAULT 'grams',
       unit_weight REAL DEFAULT 0,
       unit_weight_unit TEXT DEFAULT 'grams',
+      vape_unit_size REAL DEFAULT 1,
       target_mg_per_unit REAL DEFAULT 0,
       potency_percent REAL DEFAULT 0,
       expected_production_date TEXT DEFAULT '',
@@ -142,6 +143,7 @@ async function migrate() {
   await addColumnIfMissing("recipes", "expected_production_date", "TEXT DEFAULT ''");
   await addColumnIfMissing("recipes", "recipe_card_type", "TEXT DEFAULT 'Edible/Topical'");
   await addColumnIfMissing("recipes", "batch_size_mode", "TEXT DEFAULT 'grams'");
+  await addColumnIfMissing("recipes", "vape_unit_size", "REAL DEFAULT 1");
   await addColumnIfMissing("recipes", "copied_from_recipe_id", "INTEGER");
   await addColumnIfMissing("recipes", "copy_lock_formula", "INTEGER DEFAULT 0");
   await addColumnIfMissing("recipes", "is_new_recipe_duplicate", "INTEGER DEFAULT 0");
@@ -299,9 +301,9 @@ async function createRecipe(input) {
   const info = await execute(
     `INSERT INTO recipes (
       name, product_type, flavor, recipe_card_type, status, current_version, has_unpublished_changes, batch_size, batch_size_mode, batch_unit,
-      unit_weight, unit_weight_unit, target_mg_per_unit, potency_percent, expected_production_date,
+      unit_weight, unit_weight_unit, vape_unit_size, target_mg_per_unit, potency_percent, expected_production_date,
       copied_from_recipe_id, copy_lock_formula, is_new_recipe_duplicate, active_additives, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name || "Untitled Recipe",
       input.product_type || "",
@@ -315,6 +317,7 @@ async function createRecipe(input) {
       input.recipe_card_type === "Vape" ? "L" : "grams",
       input.unit_weight || 0,
       input.unit_weight_unit || "grams",
+      input.recipe_card_type === "Vape" ? input.vape_unit_size || 1 : input.vape_unit_size || 1,
       input.target_mg_per_unit || 0,
       input.potency_percent || 0,
       input.expected_production_date || "",
@@ -349,7 +352,7 @@ async function updateRecipe(id, input) {
   await execute(
     `UPDATE recipes SET
       name = ?, product_type = ?, flavor = ?, recipe_card_type = ?, status = ?, current_version = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
-      unit_weight = ?, unit_weight_unit = ?, target_mg_per_unit = ?, potency_percent = ?, expected_production_date = ?,
+      unit_weight = ?, unit_weight_unit = ?, vape_unit_size = ?, target_mg_per_unit = ?, potency_percent = ?, expected_production_date = ?,
       copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, active_additives = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
     [
@@ -365,6 +368,7 @@ async function updateRecipe(id, input) {
       next.recipe_card_type === "Vape" ? "L" : "grams",
       next.unit_weight || 0,
       next.unit_weight_unit || "grams",
+      next.recipe_card_type === "Vape" ? next.vape_unit_size || 1 : next.vape_unit_size || 1,
       next.target_mg_per_unit || 0,
       next.potency_percent || 0,
       next.expected_production_date || "",

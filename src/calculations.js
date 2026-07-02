@@ -34,6 +34,11 @@ function vapeTerpenePercent(recipe = {}) {
   return normalizePercent(recipe.unit_weight);
 }
 
+function vapeUnitSize(recipe = {}) {
+  const size = number(recipe.vape_unit_size || recipe.unit_size || recipe.vape_unit_grams, 1);
+  return size > 0 ? size : 1;
+}
+
 function normalizeVapeTerpenes(recipe = {}, terpeneTotalGrams = 0, finalBatchGrams = 0) {
   const rows = Array.isArray(recipe.active_additives) ? recipe.active_additives : [];
   return rows.map((row, index) => {
@@ -164,7 +169,7 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
     : 0;
   const vapeFinalBatchGrams = distillateGrams + terpeneTotalGrams;
   const totalBatchGrams = isVapeRecipe(recipe) ? vapeFinalBatchGrams : batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
-  const estimatedYield = batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
+  const estimatedYield = isVapeRecipe(recipe) ? totalBatchGrams / vapeUnitSize(recipe) : batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
   const vapeTerpenes = isVapeRecipe(recipe) ? normalizeVapeTerpenes(recipe, terpeneTotalGrams, vapeFinalBatchGrams) : [];
   const terpeneByIndex = new Map();
   vapeTerpenes.forEach((row) => {
@@ -214,6 +219,12 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
   const activeMassPerUnitMg = activeAdditives.reduce((sum, row) => sum + number(row.physical_mg_per_unit), 0);
   const activeMassPerUnitGrams = activeAdditives.reduce((sum, row) => sum + number(row.physical_grams_per_unit), 0);
   const activeIngredientGrams = activeAdditives.reduce((sum, row) => sum + number(row.calculated_grams), 0);
+  const yieldLossPercent = 0.05;
+  const theoreticalYield = estimatedYield || totalBatchGrams;
+  const yieldUnit = isVapeRecipe(recipe) ? `${vapeUnitSize(recipe)}g units` : estimatedYield > 0 ? "units" : "grams";
+  const realYield = theoreticalYield * (1 - yieldLossPercent);
+  const theoreticalBatchGrams = totalBatchGrams;
+  const realBatchGrams = totalBatchGrams * (1 - yieldLossPercent);
   const warnings = [];
 
   if (Math.abs(percentTotal - 1) > 0.005) {
@@ -236,6 +247,13 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
     batch_size_mode: batchSizeMode,
     batch_total: batchTotal,
     estimated_yield: estimatedYield,
+    theoretical_yield: theoreticalYield,
+    real_yield: realYield,
+    yield_unit: yieldUnit,
+    yield_loss_percent: yieldLossPercent,
+    theoretical_batch_grams: theoreticalBatchGrams,
+    real_batch_grams: realBatchGrams,
+    vape_unit_size: isVapeRecipe(recipe) ? vapeUnitSize(recipe) : 0,
     distillate_grams: distillateGrams,
     terpene_percent: terpenePercent,
     terpene_total_grams: terpeneTotalGrams,

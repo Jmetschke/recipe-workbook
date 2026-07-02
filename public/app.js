@@ -25,6 +25,19 @@ function qty(value) {
   return Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
+function yieldDisplay(calculations = {}) {
+  const unit = calculations.yield_unit || "units";
+  const theoreticalValue = numeric(calculations.theoretical_yield ?? calculations.estimated_yield ?? calculations.total_batch_grams);
+  const realValue = calculations.real_yield === undefined || calculations.real_yield === null
+    ? theoreticalValue * 0.95
+    : numeric(calculations.real_yield);
+  return {
+    real: `${qty(realValue)} ${unit}`,
+    theoretical: `${qty(theoreticalValue)} ${unit}`,
+    note: `Real yield is based on 5% loss. Theoretical yield assumes no waste.`
+  };
+}
+
 function isoToday() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -65,6 +78,11 @@ function vapeDistillateGrams(recipe = state.currentRecipe) {
 
 function vapeTerpenePercent(recipe = state.currentRecipe) {
   return normalizePercentInput(recipe?.unit_weight);
+}
+
+function vapeUnitSize(recipe = state.currentRecipe) {
+  const size = numeric(recipe?.vape_unit_size || recipe?.unit_size || recipe?.vape_unit_grams, 1);
+  return size > 0 ? size : 1;
 }
 
 function normalizeVapeTerpenes(recipe = {}, terpeneTotalGrams = 0, finalBatchGrams = 0) {
@@ -212,7 +230,7 @@ function calculateClientRecipe(recipe) {
   const vapeFinalBatchGrams = distillateGrams + terpeneTotalGrams;
   const totalBatchGrams = isVapeRecipe(recipe) ? vapeFinalBatchGrams : batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
   const formulaTotal = ingredients.reduce((sum, item) => sum + numeric(item.formula_qty), 0);
-  const estimatedYield = batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
+  const estimatedYield = isVapeRecipe(recipe) ? totalBatchGrams / vapeUnitSize(recipe) : batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
   const vapeTerpenes = isVapeRecipe(recipe) ? normalizeVapeTerpenes(recipe, terpeneTotalGrams, vapeFinalBatchGrams) : [];
   const terpeneByIndex = new Map();
   vapeTerpenes.forEach((row) => {
@@ -259,6 +277,12 @@ function calculateClientRecipe(recipe) {
   const activeMassPerUnitMg = activeAdditives.reduce((sum, row) => sum + numeric(row.physical_mg_per_unit), 0);
   const activeMassPerUnitGrams = activeAdditives.reduce((sum, row) => sum + numeric(row.physical_grams_per_unit), 0);
   const activeIngredientGrams = activeAdditives.reduce((sum, row) => sum + numeric(row.calculated_grams), 0);
+  const yieldLossPercent = 0.05;
+  const theoreticalYield = estimatedYield || totalBatchGrams;
+  const yieldUnit = isVapeRecipe(recipe) ? `${vapeUnitSize(recipe)}g units` : estimatedYield > 0 ? "units" : "grams";
+  const realYield = theoreticalYield * (1 - yieldLossPercent);
+  const theoreticalBatchGrams = totalBatchGrams;
+  const realBatchGrams = totalBatchGrams * (1 - yieldLossPercent);
   const warnings = [];
 
   if (Math.abs(percentTotal - 1) > 0.005) {
@@ -281,6 +305,13 @@ function calculateClientRecipe(recipe) {
     batch_size_mode: batchSizeMode,
     batch_total: batchTotal,
     estimated_yield: estimatedYield,
+    theoretical_yield: theoreticalYield,
+    real_yield: realYield,
+    yield_unit: yieldUnit,
+    yield_loss_percent: yieldLossPercent,
+    theoretical_batch_grams: theoreticalBatchGrams,
+    real_batch_grams: realBatchGrams,
+    vape_unit_size: isVapeRecipe(recipe) ? vapeUnitSize(recipe) : 0,
     distillate_grams: distillateGrams,
     terpene_percent: terpenePercent,
     terpene_total_grams: terpeneTotalGrams,
@@ -589,6 +620,7 @@ function blankRecipe(recipeCardType = "Edible/Topical") {
     batch_unit: vape ? "L" : "grams",
     unit_weight: 0,
     unit_weight_unit: vape ? "%" : "grams",
+    vape_unit_size: vape ? 1 : 0,
     target_mg_per_unit: 0,
     potency_percent: 0,
     expected_production_date: "",
@@ -637,12 +669,14 @@ async function renderEditor(id, recipe = null, mode = null) {
   const templateRecipe = r.status === "Template";
   const formulaLocked = publishedEdit || templateRecipe || Boolean(r.copy_lock_formula);
   const vapeRecipe = isVapeRecipe(r);
+  const identityLocked = (publishedView || publishedEdit) && !r.is_new_recipe_duplicate;
   setPage(r.name, publishedView ? "Published recipe card is locked. Select Edit to change allowed production fields." : "Edit recipe fields and calculated batch quantities.");
   content.innerHTML = `
     <section class="section">
       <div class="section-header">
         <div>${statusBadge(r)}</div>
         <div class="toolbar">
+          <button id="closeWithoutSaving">Close Without Saving</button>
           ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">Save Draft</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
           ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
           ${r.id && !publishedView ? '<button id="makeTemplate">Make Template</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
@@ -650,15 +684,16 @@ async function renderEditor(id, recipe = null, mode = null) {
       </div>
       <div class="grid">
         ${field("recipe_card_type", "Recipe card type", vapeRecipe ? "Vape" : "Edible/Topical", "Fresh recipes choose this before editing. Duplicates keep the original card type.", "text", true)}
-        ${field("name", "Recipe name", r.name, "", "text", publishedView || publishedEdit)}
-        ${field("product_type", "Product type", r.product_type, "", "text", publishedView || publishedEdit)}
-        ${field("flavor", "Flavor", r.flavor, "", "text", publishedView || publishedEdit)}
-        ${field("current_version", "Version to publish", r.current_version || suggestNextVersion(r.current_version), "Editable recommendation used when this recipe is published.", "text", publishedView || publishedEdit)}
+        ${field("name", "Recipe name", r.name, "", "text", identityLocked)}
+        ${field("product_type", "Product type", r.product_type, "", "text", identityLocked)}
+        ${field("flavor", "Flavor", r.flavor, "", "text", identityLocked)}
+        ${field("current_version", "Version to publish", r.current_version || suggestNextVersion(r.current_version), "Editable recommendation used when this recipe is published.", "text", identityLocked)}
         ${field("expected_production_date", "Expected production date", r.expected_production_date, "Required before publishing. Published cards appear on this calendar date.", "date", publishedView || publishedEdit)}
         ${vapeRecipe ? ""
           : selectField("batch_size_mode", "Batch size means", r.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]], "Choose whether batch size is a total gram batch or a number of finished units.", publishedView || publishedEdit)}
         ${field("batch_size", vapeRecipe ? "L of Distillate" : r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, vapeRecipe ? "This autofills the first ingredient as Concentrate - THC Distillate." : r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", publishedView)}
         ${field("unit_weight", vapeRecipe ? "% of terps in recipe" : "Weight per unit", r.unit_weight, vapeRecipe ? "Record the planned terpene percentage for this vape formula." : r.batch_size_mode === "units" ? "Required to convert units to total batch grams." : "Reference value only for estimating yield from total grams.", "number", publishedView)}
+        ${vapeRecipe ? selectField("vape_unit_size", "Unit size", r.vape_unit_size || 1, [[1, "1g units"], [2, "2g units"]], "Used to calculate theoretical and real yield units from the final batch grams.", publishedView) : ""}
         ${vapeRecipe ? "" : field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", publishedView || publishedEdit)}
       </div>
       ${formulaLocked ? '<div class="warning">This recipe formula is locked. Formula quantity, formula percent, and batch quantity are not directly editable, but recalculations can still update them.</div>' : ""}
@@ -710,11 +745,12 @@ function field(name, label, value, help = "", type = "text", locked = false) {
 }
 
 function selectField(name, label, value, options, help = "", locked = false) {
-  return `<label>${label}${help ? `<span class="helper">${help}</span>` : ""}<select name="${name}" ${locked ? "disabled" : ""}>${options.map(([optionValue, text]) => `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
+  return `<label>${label}${help ? `<span class="helper">${help}</span>` : ""}<select name="${name}" ${locked ? "disabled" : ""}>${options.map(([optionValue, text]) => `<option value="${optionValue}" ${String(optionValue) === String(value) ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
 }
 
 function renderMetrics(recipe) {
   const c = recipe.calculations || {};
+  const y = yieldDisplay(c);
   return `
     <section class="section" id="calcSummary">
       <div class="grid">
@@ -722,11 +758,13 @@ function renderMetrics(recipe) {
         <div class="metric"><strong>Percent total</strong><p>${pct(c.percent_total)}</p></div>
         <div class="metric"><strong>${isVapeRecipe(recipe) ? "Distillate" : "Total batch size"}</strong><p>${qty(isVapeRecipe(recipe) ? c.distillate_grams : c.total_batch_grams)} grams</p></div>
         <div class="metric"><strong>${isVapeRecipe(recipe) ? "Final batch" : "Batch total"}</strong><p>${qty(isVapeRecipe(recipe) ? c.final_batch_grams : c.batch_total)} grams</p></div>
-        <div class="metric"><strong>${isVapeRecipe(recipe) ? "Terps in recipe" : "Estimated yield"}</strong><p>${isVapeRecipe(recipe) ? pct(c.terpene_percent) : `${qty(c.estimated_yield)} units`}</p></div>
+        <div class="metric"><strong>Real yield</strong><p>${y.real}</p></div>
+        <div class="metric"><strong>Theoretical yield</strong><p>${y.theoretical}</p></div>
       </div>
+      <div class="helper">${y.note}</div>
       ${isVapeRecipe(recipe)
         ? `<div class="helper">Vape terpene math: ${qty(c.distillate_grams)} grams distillate needs ${qty(c.terpene_total_grams)} grams terpenes for ${pct(c.terpene_percent)} of a ${qty(c.final_batch_grams)} gram final batch.</div>`
-        : `<div class="helper">Active/additive math totals: ${qty(c.active_mass_per_unit_mg)} mg physical additive per unit across ${(c.active_additives || []).length} additive calculation(s), ${qty(c.active_ingredient_grams)} grams total additive for ${qty(c.estimated_yield)} units.</div>`}
+        : `<div class="helper">Active/additive math totals: ${qty(c.active_mass_per_unit_mg)} mg physical additive per unit across ${(c.active_additives || []).length} additive calculation(s), ${qty(c.active_ingredient_grams)} grams total additive. Yield shown as ${y.real} real yield based on 5% loss; ${y.theoretical} theoretical yield assumes no waste.</div>`}
       ${(c.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
     </section>
   `;
@@ -821,6 +859,7 @@ function additiveUnitCountValue(row, calculated) {
 
 function renderActiveAdditiveTool(recipe, locked = false) {
   const c = recipe.calculations || {};
+  const y = yieldDisplay(c);
   const additives = ensureActiveAdditives(recipe);
   if (isVapeRecipe(recipe)) {
     return `
@@ -879,7 +918,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
       <div class="grid">
         <div class="metric"><strong>Total physical additive per unit</strong><p>${qty(c.active_mass_per_unit_mg)} mg</p></div>
         <div class="metric"><strong>Total physical additive per unit</strong><p>${qty(c.active_mass_per_unit_grams)} grams</p></div>
-        <div class="metric"><strong>Estimated units</strong><p>${qty(c.estimated_yield)}</p></div>
+        <div class="metric"><strong>Real yield</strong><p>${y.real}</p></div>
         <div class="metric"><strong>Total additive grams</strong><p>${qty(c.active_ingredient_grams)} grams</p></div>
       </div>
       <div class="table-wrap active-additive-wrap">
@@ -1224,6 +1263,11 @@ function bindEditor() {
   content.querySelector("#editPublished")?.addEventListener("click", () => {
     renderEditor(state.currentRecipe.id, state.currentRecipe, "published-edit");
   });
+  content.querySelector("#closeWithoutSaving")?.addEventListener("click", () => {
+    if (!window.confirm("Close without saving changes?")) return;
+    showToast("Closed without saving.");
+    renderDashboard();
+  });
   content.querySelector("#deleteRecipe")?.addEventListener("click", async () => {
     if (!window.confirm("Delete this recipe and its published versions?")) return;
     await api(`/api/recipes/${state.currentRecipe.id}`, { method: "DELETE" });
@@ -1551,6 +1595,11 @@ async function renderVersionCard(versionId) {
   const version = await api(`/api/versions/${versionId}`);
   const recipe = version.recipe;
   const calculations = version.calculations;
+  const y = yieldDisplay(calculations);
+  const theoreticalBatchGrams = numeric(calculations.theoretical_batch_grams ?? calculations.total_batch_grams);
+  const realBatchGrams = calculations.real_batch_grams === undefined || calculations.real_batch_grams === null
+    ? theoreticalBatchGrams * 0.95
+    : numeric(calculations.real_batch_grams);
   content.innerHTML = `
     <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="printIngredientsList">Printable Ingredients List</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
     <article class="card-page">
@@ -1568,7 +1617,8 @@ async function renderVersionCard(versionId) {
         <div><strong>Product / Flavor</strong><p>${recipe.product_type || ""} ${recipe.flavor || ""}</p></div>
         <div><strong>Batch size input</strong><p>${batchInputLabel(recipe)}</p></div>
         <div><strong>Total batch grams</strong><p>${qty(calculations.total_batch_grams)} grams</p></div>
-        <div><strong>Yield</strong><p>${qty(calculations.estimated_yield)} units</p></div>
+        <div><strong>Real yield</strong><p>${y.real}</p><span class="helper">Based on 5% loss.</span></div>
+        <div><strong>Theoretical yield</strong><p>${y.theoretical}</p><span class="helper">No waste.</span></div>
         <div><strong>Production date</strong><p>${recipe.expected_production_date || ""}</p></div>
         <div><strong>Published by</strong><p>${version.published_by || ""}</p></div>
       </section>
@@ -1579,7 +1629,10 @@ async function renderVersionCard(versionId) {
       </table>
       <h2>Calculation Summary</h2>
       <p>Formula total: ${qty(calculations.formula_total)} • Percent total: ${pct(calculations.percent_total)} • Batch total: ${qty(calculations.batch_total)}</p>
-      <p>Active/additive totals: ${qty(calculations.active_mass_per_unit_mg)} mg physical additive per unit across ${(calculations.active_additives || []).length} additive calculation(s); ${qty(calculations.active_ingredient_grams)} grams total additive.</p>
+      <p>Real yield: ${y.real} based on 5% loss. Theoretical yield: ${y.theoretical} assuming no waste. Real batch grams: ${qty(realBatchGrams)} grams from ${qty(theoreticalBatchGrams)} theoretical grams.</p>
+      ${recipe.recipe_card_type === "Vape"
+        ? `<p>Vape terpene totals: ${qty(calculations.terpene_total_grams)} grams terpenes for ${pct(calculations.terpene_percent)} of a ${qty(calculations.final_batch_grams)} gram theoretical final batch.</p>`
+        : `<p>Active/additive totals: ${qty(calculations.active_mass_per_unit_mg)} mg physical additive per unit across ${(calculations.active_additives || []).length} additive calculation(s); ${qty(calculations.active_ingredient_grams)} grams total additive.</p>`}
       ${(calculations.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
       <h2>SOP / Process Instructions</h2>
       <ol>${version.steps.map((step) => `<li>${step.instruction_text}</li>`).join("")}</ol>
