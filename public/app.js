@@ -439,6 +439,36 @@ function suggestNextVersion(version) {
   return value || "v1";
 }
 
+function templateConflict(name, version, recipes = []) {
+  const wantedName = String(name || "").trim().toLowerCase();
+  const wantedVersion = String(version || "").trim().toLowerCase();
+  return recipes.some((recipe) => recipe.status === "Template"
+    && String(recipe.name || "").trim().toLowerCase() === wantedName
+    && String(recipe.current_version || "").trim().toLowerCase() === wantedVersion);
+}
+
+async function promptTemplateIdentity(source) {
+  await loadRecipes({});
+  let name = window.prompt("Template name", `${source.name || "Untitled Recipe"} Template`);
+  if (name === null) return null;
+  name = name.trim() || `${source.name || "Untitled Recipe"} Template`;
+  let version = window.prompt("Template version", source.current_version || "v1");
+  if (version === null) return null;
+  version = version.trim() || source.current_version || "v1";
+
+  while (templateConflict(name, version, state.recipes)) {
+    showToast("A template with that name and version already exists.");
+    const nextName = window.prompt("Template name already exists for that version. Enter a new template name.", name);
+    if (nextName === null) return null;
+    name = nextName.trim() || name;
+    const nextVersion = window.prompt("Enter a new template version.", suggestNextVersion(version));
+    if (nextVersion === null) return null;
+    version = nextVersion.trim() || suggestNextVersion(version);
+  }
+
+  return { name, version };
+}
+
 function statusBadge(recipe) {
   if (recipe.status === "Published" && recipe.has_unpublished_changes) return '<span class="badge Unpublished">Unpublished Changes</span>';
   return `<span class="badge ${recipe.status}">${recipe.status}</span>`;
@@ -667,19 +697,22 @@ async function renderEditor(id, recipe = null, mode = null) {
   const publishedView = state.editorMode === "published-view";
   const publishedEdit = state.editorMode === "published-edit";
   const templateRecipe = r.status === "Template";
+  const templateLocked = templateRecipe && !r.is_new_recipe_duplicate;
   const formulaLocked = publishedEdit || templateRecipe || Boolean(r.copy_lock_formula);
   const vapeRecipe = isVapeRecipe(r);
-  const identityLocked = (publishedView || publishedEdit) && !r.is_new_recipe_duplicate;
-  setPage(r.name, publishedView ? "Published recipe card is locked. Select Edit to change allowed production fields." : "Edit recipe fields and calculated batch quantities.");
+  const identityLocked = ((publishedView || publishedEdit) && !r.is_new_recipe_duplicate) || templateLocked;
+  const headerLocked = publishedView || publishedEdit || templateLocked;
+  setPage(r.name, templateLocked ? "Template recipe card is locked. Start a new recipe to make changes." : publishedView ? "Published recipe card is locked. Select Edit to change allowed production fields." : "Edit recipe fields and calculated batch quantities.");
   content.innerHTML = `
     <section class="section">
       <div class="section-header">
         <div>${statusBadge(r)}</div>
         <div class="toolbar">
           <button id="closeWithoutSaving">Close Without Saving</button>
-          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">Save Draft</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
+          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : templateLocked ? '<button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">Save Draft</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
           ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
-          ${r.id && !publishedView ? '<button id="makeTemplate">Make Template</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
+          ${r.id && !publishedView && !templateLocked ? '<button id="makeTemplate">Make Template</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
+          ${r.id && templateLocked ? '<button id="archiveRecipe" class="danger">Archive Template</button>' : ""}
         </div>
       </div>
       <div class="grid">
@@ -688,18 +721,18 @@ async function renderEditor(id, recipe = null, mode = null) {
         ${field("product_type", "Product type", r.product_type, "", "text", identityLocked)}
         ${field("flavor", "Flavor", r.flavor, "", "text", identityLocked)}
         ${field("current_version", "Version to publish", r.current_version || suggestNextVersion(r.current_version), "Editable recommendation used when this recipe is published.", "text", identityLocked)}
-        ${field("expected_production_date", "Expected production date", r.expected_production_date, "Required before publishing. Published cards appear on this calendar date.", "date", publishedView || publishedEdit)}
+        ${field("expected_production_date", "Expected production date", r.expected_production_date, "Required before publishing. Published cards appear on this calendar date.", "date", headerLocked)}
         ${vapeRecipe ? ""
-          : selectField("batch_size_mode", "Batch size means", r.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]], "Choose whether batch size is a total gram batch or a number of finished units.", publishedView || publishedEdit)}
-        ${field("batch_size", vapeRecipe ? "L of Distillate" : r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, vapeRecipe ? "This autofills the first ingredient as Concentrate - THC Distillate." : r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", publishedView)}
-        ${field("unit_weight", vapeRecipe ? "% of terps in recipe" : "Weight per unit", r.unit_weight, vapeRecipe ? "Record the planned terpene percentage for this vape formula." : r.batch_size_mode === "units" ? "Required to convert units to total batch grams." : "Reference value only for estimating yield from total grams.", "number", publishedView)}
-        ${vapeRecipe ? selectField("vape_unit_size", "Unit size", r.vape_unit_size || 1, [[1, "1g units"], [2, "2g units"]], "Used to calculate theoretical and real yield units from the final batch grams.", publishedView) : ""}
-        ${vapeRecipe ? "" : field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", publishedView || publishedEdit)}
+          : selectField("batch_size_mode", "Batch size means", r.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]], "Choose whether batch size is a total gram batch or a number of finished units.", headerLocked)}
+        ${field("batch_size", vapeRecipe ? "L of Distillate" : r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, vapeRecipe ? "This autofills the first ingredient as Concentrate - THC Distillate." : r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", publishedView || templateLocked)}
+        ${field("unit_weight", vapeRecipe ? "% of terps in recipe" : "Weight per unit", r.unit_weight, vapeRecipe ? "Record the planned terpene percentage for this vape formula." : r.batch_size_mode === "units" ? "Required to convert units to total batch grams." : "Reference value only for estimating yield from total grams.", "number", publishedView || templateLocked)}
+        ${vapeRecipe ? selectField("vape_unit_size", "Unit size", r.vape_unit_size || 1, [[1, "1g units"], [2, "2g units"]], "Used to calculate theoretical and real yield units from the final batch grams.", publishedView || templateLocked) : ""}
+        ${vapeRecipe ? "" : field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", headerLocked)}
       </div>
       ${formulaLocked ? '<div class="warning">This recipe formula is locked. Formula quantity, formula percent, and batch quantity are not directly editable, but recalculations can still update them.</div>' : ""}
     </section>
     ${renderMetrics(r)}
-    ${renderActiveAdditiveTool(r, publishedView || publishedEdit)}
+    ${renderActiveAdditiveTool(r, publishedView || publishedEdit || templateLocked)}
     <section class="section">
       <div class="section-header">
         <h2>Ingredients</h2>
@@ -720,18 +753,18 @@ async function renderEditor(id, recipe = null, mode = null) {
     <section class="section">
       <div class="section-header">
         <h2>SOP Instructions</h2>
-        <button id="addStep">Add Step</button>
+        ${templateLocked ? "" : '<button id="addStep">Add Step</button>'}
       </div>
       <div id="stepRows"></div>
     </section>
     <section class="section">
       <h2>Internal Draft Notes</h2>
-      <textarea id="notesField">${(r.notes || []).join("\n")}</textarea>
+      <textarea id="notesField" ${templateLocked ? "readonly" : ""}>${(r.notes || []).join("\n")}</textarea>
     </section>
     <section class="section no-print">
       <div class="toolbar">
-        ${publishedView ? "" : '<button id="recalculate">Recalculate</button>'}
-        ${r.current_version ? '<button id="previewCard">Preview Final Card</button>' : ""}
+        ${publishedView || templateLocked ? "" : '<button id="recalculate">Recalculate</button>'}
+        ${r.current_version && !templateLocked ? '<button id="previewCard">Preview Final Card</button>' : ""}
       </div>
     </section>
   `;
@@ -1198,15 +1231,15 @@ function mirrorFormulaField(index, changedField) {
 
 function renderStepRows() {
   const wrapper = content.querySelector("#stepRows");
+  const locked = state.editorMode === "published-view" || state.currentRecipe.status === "Template";
   wrapper.innerHTML = (state.currentRecipe.steps || []).map((step, index) => `
     <div class="toolbar step-row" data-index="${index}">
-      <textarea>${step.instruction_text || ""}</textarea>
-      <button data-up="${index}">↑</button>
-      <button data-down="${index}">↓</button>
-      <button data-remove-step="${index}" class="danger">Remove</button>
+      <textarea ${locked ? "readonly" : ""}>${step.instruction_text || ""}</textarea>
+      ${locked ? "" : `<button data-up="${index}">↑</button><button data-down="${index}">↓</button><button data-remove-step="${index}" class="danger">Remove</button>`}
     </div>
   `).join("");
   wrapper.querySelectorAll("textarea").forEach((textarea) => textarea.addEventListener("input", () => {
+    if (locked) return;
     const index = Number(textarea.closest(".step-row").dataset.index);
     state.currentRecipe.steps[index].instruction_text = textarea.value;
   }));
@@ -1313,11 +1346,21 @@ function bindEditor() {
   });
   content.querySelector("#makeTemplate")?.addEventListener("click", async () => {
     const payload = collectRecipe();
-    payload.status = "Template";
-    payload.copy_lock_formula = true;
-    if (payload.id) await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
-    else await api("/api/recipes", { method: "POST", body: payload });
-    showToast("Recipe saved as a template.");
+    const identity = await promptTemplateIdentity(payload);
+    if (!identity) return;
+    const templatePayload = {
+      ...payload,
+      id: undefined,
+      name: identity.name,
+      current_version: identity.version,
+      status: "Template",
+      has_unpublished_changes: false,
+      copied_from_recipe_id: payload.id || payload.copied_from_recipe_id || null,
+      copy_lock_formula: true,
+      is_new_recipe_duplicate: false
+    };
+    await api("/api/recipes", { method: "POST", body: templatePayload });
+    showToast("New template created.");
     renderDashboard();
   });
   content.querySelector("#publishRecipe")?.addEventListener("click", async () => {

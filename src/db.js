@@ -337,6 +337,11 @@ async function createRecipe(input) {
 async function updateRecipe(id, input) {
   const existing = await getRecipe(id);
   if (!existing) return null;
+  if (existing.status === "Template" && input.status !== "Archived") {
+    const error = new Error("Templates are locked. Start a new recipe from the template and save a new template instead.");
+    error.statusCode = 400;
+    throw error;
+  }
   const next = { ...existing, ...input };
   const incomingIngredients = input.ingredients || existing.ingredients;
   const ingredientsForCalculation = existing.status === "Published"
