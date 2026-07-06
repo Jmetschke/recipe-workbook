@@ -528,6 +528,7 @@ function recipeCards(recipes) {
 }
 
 function recipeSections(recipes, filter = "All") {
+  if (filter === "Draft") return recipeCards(recipes.filter((recipe) => recipe.status === "Draft"));
   if (filter !== "All") return recipeCards(recipes);
   const templates = recipes.filter((recipe) => recipe.status === "Template");
   const drafts = recipes.filter((recipe) => recipe.status === "Draft");
@@ -1436,6 +1437,7 @@ function bindEditor() {
     const saved = await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
     const publishedBy = window.prompt("Published by", "Production") || "Production";
     const published = await api(`/api/recipes/${saved.id}/publish`, { method: "POST", body: { published_by: publishedBy } });
+    state.recipes = state.recipes.filter((recipe) => recipe.id !== published.id).concat(published);
     showToast(`Published ${published.current_version}.`);
     renderDashboard();
   });
