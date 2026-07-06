@@ -5,7 +5,8 @@ const state = {
   currentRecipe: null,
   editorMode: "draft",
   importPreview: null,
-  selectedImportIndexes: new Set()
+  selectedImportIndexes: new Set(),
+  dashboardWindowStartKey: null
 };
 
 const content = document.querySelector("#content");
@@ -49,6 +50,35 @@ function monthKey(dateString = isoToday()) {
 function monthLabel(key) {
   const [year, month] = key.split("-").map(Number);
   return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function parseLocalDate(dateString = isoToday()) {
+  const [year, month, day] = (dateString || isoToday()).slice(0, 10).split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function localDateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function startOfWeek(date = parseLocalDate(isoToday())) {
+  const start = new Date(date);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+}
+
+function shortDateLabel(dateString) {
+  return parseLocalDate(dateString).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function batchInputLabel(recipe) {
@@ -520,6 +550,7 @@ function recipeSections(recipes, filter = "All") {
 
 async function renderDashboard(filter = "All") {
   state.view = filter === "Template" ? "templates" : filter === "Draft" ? "drafts" : filter === "Archived" ? "archived" : "dashboard";
+  if (filter === "All") state.dashboardWindowStartKey = localDateKey(startOfWeek());
   const pageName = filter === "Template" ? "Templates" : filter === "Draft" ? "Draft Recipes" : filter === "Archived" ? "Archived Recipes" : "Dashboard";
   const pageHelp = filter === "Archived"
     ? "Archived recipes are kept out of active production views but can still be opened or deleted."
@@ -551,6 +582,8 @@ async function renderDashboard(filter = "All") {
     await loadRecipes({ q: event.target.value, status: content.querySelector("#statusFilter").value });
     const currentFilter = content.querySelector("#statusFilter").value;
     const nextVisibleRecipes = currentFilter === "All" ? state.recipes.filter((recipe) => recipe.status !== "Archived") : state.recipes;
+    const miniCalendar = content.querySelector("#dashboardMiniCalendar");
+    if (miniCalendar) miniCalendar.outerHTML = renderDashboardMiniCalendar(nextVisibleRecipes);
     content.querySelector("#recipeList").innerHTML = recipeSections(nextVisibleRecipes, currentFilter);
     bindRecipeListButtons();
   });
@@ -560,46 +593,77 @@ async function renderDashboard(filter = "All") {
 
 function renderDashboardMiniCalendar(recipes = []) {
   const published = recipes.filter((recipe) => recipe.status === "Published");
-  const month = monthKey(published[0]?.expected_production_date || isoToday());
-  const [year, monthNumber] = month.split("-").map(Number);
-  const daysInMonth = new Date(year, monthNumber, 0).getDate();
-  const offset = new Date(year, monthNumber - 1, 1).getDay();
+  const windowStart = parseLocalDate(state.dashboardWindowStartKey || localDateKey(startOfWeek()));
+  const windowEnd = addDays(windowStart, 27);
+  const windowStartKey = localDateKey(windowStart);
+  const windowEndKey = localDateKey(windowEnd);
   const byDate = new Map();
   published.forEach((recipe) => {
     const date = recipe.expected_production_date || recipe.updated_at?.slice(0, 10) || isoToday();
-    if (monthKey(date) !== month) return;
+    if (date < windowStartKey || date > windowEndKey) return;
     if (!byDate.has(date)) byDate.set(date, []);
     byDate.get(date).push(recipe);
   });
   const cells = [];
-  for (let i = 0; i < offset; i += 1) cells.push('<div class="mini-calendar-cell muted-cell"></div>');
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    const date = `${month}-${String(day).padStart(2, "0")}`;
+  for (let dayOffset = 0; dayOffset < 28; dayOffset += 1) {
+    const date = localDateKey(addDays(windowStart, dayOffset));
     const dayRecipes = byDate.get(date) || [];
     cells.push(`
       <div class="mini-calendar-cell">
-        <div class="calendar-day">${day}</div>
+        <div class="calendar-day">${shortDateLabel(date)}</div>
         ${dayRecipes.slice(0, 2).map((recipe) => `<button class="mini-calendar-recipe" data-mini-card-recipe="${recipe.id}">${escapeHtml(recipe.name)}</button>`).join("")}
         ${dayRecipes.length > 2 ? `<span class="helper">+${dayRecipes.length - 2} more</span>` : ""}
       </div>
     `);
   }
   return `
-    <section class="mini-calendar-section">
+    <section class="mini-calendar-section" id="dashboardMiniCalendar">
       <div class="section-header">
-        <h2>Published Production Calendar</h2>
-        <button data-view-full-calendar>View Full Calendar</button>
+        <div>
+          <h2>Published Production Calendar</h2>
+          <p class="helper">Four-week production window: ${shortDateLabel(windowStartKey)} to ${shortDateLabel(windowEndKey)}</p>
+        </div>
+        <div class="toolbar mini-calendar-controls">
+          <button data-dashboard-calendar-shift="-14">Back 2 Weeks</button>
+          <button data-dashboard-calendar-current>Current 4 Weeks</button>
+          <button data-dashboard-calendar-shift="14">Forward 2 Weeks</button>
+          <button data-view-full-calendar>View Full Calendar</button>
+        </div>
       </div>
       <div class="mini-calendar-grid">${cells.join("")}</div>
     </section>
   `;
 }
 
+function dashboardCalendarRecipes() {
+  return state.recipes.filter((recipe) => recipe.status !== "Archived");
+}
+
+function refreshDashboardMiniCalendar() {
+  const miniCalendar = content.querySelector("#dashboardMiniCalendar");
+  if (!miniCalendar) return;
+  miniCalendar.outerHTML = renderDashboardMiniCalendar(dashboardCalendarRecipes());
+  bindMiniCalendarButtons();
+}
+
+function bindMiniCalendarButtons() {
+  content.querySelectorAll("[data-mini-card-recipe]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.miniCardRecipe)));
+  content.querySelector("[data-view-full-calendar]")?.addEventListener("click", () => renderCards());
+  content.querySelectorAll("[data-dashboard-calendar-shift]").forEach((button) => button.addEventListener("click", () => {
+    const start = parseLocalDate(state.dashboardWindowStartKey || localDateKey(startOfWeek()));
+    state.dashboardWindowStartKey = localDateKey(addDays(start, Number(button.dataset.dashboardCalendarShift)));
+    refreshDashboardMiniCalendar();
+  }));
+  content.querySelector("[data-dashboard-calendar-current]")?.addEventListener("click", () => {
+    state.dashboardWindowStartKey = localDateKey(startOfWeek());
+    refreshDashboardMiniCalendar();
+  });
+}
+
 function bindRecipeListButtons() {
   content.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => renderEditor(button.dataset.open)));
   content.querySelectorAll("[data-print-card]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.printCard)));
-  content.querySelectorAll("[data-mini-card-recipe]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.miniCardRecipe)));
-  content.querySelector("[data-view-full-calendar]")?.addEventListener("click", () => renderCards());
+  bindMiniCalendarButtons();
   content.querySelectorAll("[data-duplicate]").forEach((button) => button.addEventListener("click", async () => {
     const copy = await api(`/api/recipes/${button.dataset.duplicate}/duplicate`, { method: "POST", body: {} });
     showToast("Recipe duplicated.");
@@ -738,7 +802,7 @@ async function renderEditor(id, recipe = null, mode = null) {
         <h2>Ingredients</h2>
         ${publishedView || publishedEdit || formulaLocked ? "" : '<button id="addIngredient">Add Ingredient</button>'}
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap ingredient-table-wrap">
         <table class="ingredient-table">
           <thead>
             <tr>
@@ -923,11 +987,11 @@ function renderActiveAdditiveTool(recipe, locked = false) {
             <tbody>
               ${additives.length ? additives.map((row, index) => `
                 <tr data-additive-index="${index}">
-                  <td><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
-                  <td><input type="number" step="any" min="0" data-additive-field="terpene_share_percent" value="${escapeHtml(row.terpene_share_percent !== undefined && row.terpene_share_percent !== "" ? row.terpene_share_percent * 100 : row.recorded_percent ?? row.potency_percent ?? "")}" ${locked ? "readonly" : ""}></td>
-                  <td><input class="calculated" readonly value="${qty(row.calculated_grams)}"></td>
-                  <td><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
-                  <td><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
+                  <td data-mobile-label="Terpene"><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
+                  <td data-mobile-label="% of terpene blend"><input type="number" step="any" min="0" data-additive-field="terpene_share_percent" value="${escapeHtml(row.terpene_share_percent !== undefined && row.terpene_share_percent !== "" ? row.terpene_share_percent * 100 : row.recorded_percent ?? row.potency_percent ?? "")}" ${locked ? "readonly" : ""}></td>
+                  <td data-mobile-label="Calculated grams"><input class="calculated" readonly value="${qty(row.calculated_grams)}"></td>
+                  <td data-mobile-label="Match to ingredient"><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
+                  <td data-mobile-label="Actions"><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
                 </tr>
               `).join("") : '<tr><td colspan="5" class="helper">No terpene rows yet.</td></tr>'}
             </tbody>
@@ -979,20 +1043,20 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                   const calculated = additiveCalculatedRow(row, c);
                   const type = calculated.concentration_type === "mg_per_unit" ? "mg_per_unit" : "percent";
                   return `
-                    <td><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
-                    <td><select data-additive-field="concentration_type" ${locked ? "disabled" : ""}>${concentrationTypeOptions(type)}</select></td>
-                    <td>${type === "percent" ? additiveNumberInput("target_mg_per_unit", row.target_mg_per_unit, locked) : additiveNumberInput("mg_per_unit", row.mg_per_unit ?? row.target_mg_per_unit, locked)}</td>
-                    <td>${type === "percent" ? additiveNumberInput("potency_percent", row.potency_percent, locked) : '<input class="calculated" readonly value="">'} </td>
-                    <td>${type === "mg_per_unit" ? additiveNumberInput("mg_per_g", row.mg_per_g, locked) : '<input class="calculated" readonly value="">'} </td>
-                    <td>${type === "mg_per_unit" ? additiveNumberInput("grams_per_unit", row.grams_per_unit, locked) : '<input class="calculated" readonly value="">'} </td>
-                    <td>${type === "mg_per_unit" ? additiveNumberInput("unit_count", additiveUnitCountValue(row, calculated), locked) : '<input class="calculated" readonly value="">'} </td>
-                    <td><input class="calculated" readonly value="${qty(calculated.total_active_mg)}"></td>
-                    <td><input class="calculated" readonly value="${qty(calculated.physical_mg_per_unit)}"></td>
-                    <td><input class="calculated" readonly value="${qty(calculated.calculated_grams)}"></td>
+                    <td data-mobile-label="Additive"><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
+                    <td data-mobile-label="Basis"><select data-additive-field="concentration_type" ${locked ? "disabled" : ""}>${concentrationTypeOptions(type)}</select></td>
+                    <td data-mobile-label="${type === "percent" ? "Target mg/unit" : "Mg/unit"}">${type === "percent" ? additiveNumberInput("target_mg_per_unit", row.target_mg_per_unit, locked) : additiveNumberInput("mg_per_unit", row.mg_per_unit ?? row.target_mg_per_unit, locked)}</td>
+                    <td data-mobile-label="Potency %">${type === "percent" ? additiveNumberInput("potency_percent", row.potency_percent, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td data-mobile-label="mg/g concentrate">${type === "mg_per_unit" ? additiveNumberInput("mg_per_g", row.mg_per_g, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td data-mobile-label="g/unit">${type === "mg_per_unit" ? additiveNumberInput("grams_per_unit", row.grams_per_unit, locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td data-mobile-label="Units">${type === "mg_per_unit" ? additiveNumberInput("unit_count", additiveUnitCountValue(row, calculated), locked) : '<input class="calculated" readonly value="">'} </td>
+                    <td data-mobile-label="Total mg"><input class="calculated" readonly value="${qty(calculated.total_active_mg)}"></td>
+                    <td data-mobile-label="Physical mg/unit"><input class="calculated" readonly value="${qty(calculated.physical_mg_per_unit)}"></td>
+                    <td data-mobile-label="Calculated grams"><input class="calculated" readonly value="${qty(calculated.calculated_grams)}"></td>
                   `;
                 })()}
-                <td><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
-                <td><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
+                <td data-mobile-label="Match to ingredient"><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
+                <td data-mobile-label="Actions"><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
               </tr>
             `).join("") : '<tr><td colspan="12" class="helper">No additive calculations yet.</td></tr>'}
           </tbody>
@@ -1849,6 +1913,15 @@ document.querySelectorAll(".nav").forEach((button) => button.addEventListener("c
 
 document.querySelector("#newRecipeBtn").addEventListener("click", () => renderNewRecipeChoice());
 document.querySelector("#importShortcutBtn").addEventListener("click", () => renderImport());
+
+// Register the PWA service worker after the app starts; API calls remain live because the worker skips /api routes.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch((err) => {
+      console.warn("Service worker registration failed", err);
+    });
+  });
+}
 
 renderDashboard().catch((err) => {
   content.innerHTML = `<section class="section"><div class="warning">${err.message}</div></section>`;

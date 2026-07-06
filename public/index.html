@@ -2,8 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- PWA/mobile viewport uses viewport-fit so installed iPhone apps can respect the safe area. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#246b8f">
+    <meta name="application-name" content="Recipe Manager">
+    <meta name="mobile-web-app-capable" content="yes">
+    <!-- iOS Safari uses these tags for Add to Home Screen standalone behavior and icon selection. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Recipe Manager">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>Recipe Manager</title>
+    <!-- PWA manifest and Apple icon make the internal app installable from mobile browsers. -->
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -16,6 +27,11 @@
       <button class="nav" data-view="archived">Archived</button>
       <button class="nav" data-view="ingredients">Ingredients</button>
       <button class="nav" data-view="settings">Settings</button>
+      <div class="external-nav-group" aria-label="External web pages">
+        <div class="external-nav-label">External Web Pages</div>
+        <a class="external-nav" href="https://manufacturing-tracker.onrender.com" target="_blank" rel="noopener noreferrer">Time Tracker ↗</a>
+        <a class="external-nav" href="https://ingredient-projection-workbook.onrender.com" target="_blank" rel="noopener noreferrer">Ingredient Workbook ↗</a>
+      </div>
     </aside>
     <main class="app">
       <header class="topbar">
@@ -34,7 +50,7 @@
 
     <template id="recipeRowTemplate">
       <tr>
-        <td>
+        <td data-mobile-label="Type">
           <select data-field="ingredient_type">
             <option value=""></option>
             <option value="SB">SB</option>
@@ -43,14 +59,14 @@
             <option value="Topicals">Topicals</option>
           </select>
         </td>
-        <td><select data-field="ingredient_name"></select></td>
-        <td><input type="number" step="any" data-field="formula_qty"></td>
-        <td><input type="number" step="any" data-field="formula_percent"></td>
-        <td><input data-field="unit"></td>
-        <td><input data-field="vendor"></td>
-        <td><input data-field="notes"></td>
-        <td><input type="number" step="any" data-field="batch_qty" class="batch-qty-field calculated" readonly></td>
-        <td><button class="icon danger" data-action="removeIngredient">×</button></td>
+        <td data-mobile-label="Name"><select data-field="ingredient_name"></select></td>
+        <td data-mobile-label="Formula qty"><input type="number" step="any" data-field="formula_qty"></td>
+        <td data-mobile-label="Formula %"><input type="number" step="any" data-field="formula_percent"></td>
+        <td data-mobile-label="Unit"><input data-field="unit"></td>
+        <td data-mobile-label="Vendor"><input data-field="vendor"></td>
+        <td data-mobile-label="Notes"><input data-field="notes"></td>
+        <td data-mobile-label="Batch qty to use"><input type="number" step="any" data-field="batch_qty" class="batch-qty-field calculated" readonly></td>
+        <td data-mobile-label="Actions"><button class="icon danger" data-action="removeIngredient">×</button></td>
       </tr>
     </template>
 
