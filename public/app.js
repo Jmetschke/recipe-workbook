@@ -518,6 +518,8 @@ function recipeCards(recipes) {
       <div class="toolbar">
         <button data-open="${recipe.id}">Open</button>
         ${recipe.status === "Published" && recipe.current_version ? `<button data-print-card="${recipe.id}" class="primary">Printable Card</button>` : ""}
+        ${recipe.status === "Published" ? `<button data-unpublish-card="${recipe.id}">Unpublish</button>` : ""}
+        ${recipe.status === "Template" ? `<button data-export-template="${recipe.id}">Export Template</button>` : ""}
         <button data-duplicate="${recipe.id}">Duplicate</button>
         <button data-duplicate-new="${recipe.id}" title="Duplicate and Start New Recipe">Start New Recipe</button>
         ${recipe.status === "Archived" ? "" : `<button data-archive-card="${recipe.id}" class="danger">Archive</button>`}
@@ -661,9 +663,22 @@ function bindMiniCalendarButtons() {
   });
 }
 
+async function unpublishRecipeFromUi(recipeId, after = "Draft") {
+  if (!window.confirm("Unpublish this recipe and return it to Drafts for editing? Published version history will remain saved.")) return;
+  const draft = await api(`/api/recipes/${recipeId}/unpublish`, { method: "POST", body: {} });
+  state.recipes = state.recipes.filter((recipe) => recipe.id !== draft.id).concat(draft);
+  showToast("Recipe moved back to Drafts.");
+  if (after === "cards") renderCards();
+  else renderDashboard("Draft");
+}
+
 function bindRecipeListButtons() {
   content.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => renderEditor(button.dataset.open)));
   content.querySelectorAll("[data-print-card]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.printCard)));
+  content.querySelectorAll("[data-unpublish-card]").forEach((button) => button.addEventListener("click", () => unpublishRecipeFromUi(button.dataset.unpublishCard)));
+  content.querySelectorAll("[data-export-template]").forEach((button) => button.addEventListener("click", () => {
+    window.location.href = `/api/recipes/${button.dataset.exportTemplate}/template-export`;
+  }));
   bindMiniCalendarButtons();
   content.querySelectorAll("[data-duplicate]").forEach((button) => button.addEventListener("click", async () => {
     const copy = await api(`/api/recipes/${button.dataset.duplicate}/duplicate`, { method: "POST", body: {} });
@@ -774,7 +789,7 @@ async function renderEditor(id, recipe = null, mode = null) {
         <div>${statusBadge(r)}</div>
         <div class="toolbar">
           <button id="closeWithoutSaving">Close Without Saving</button>
-          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="deleteRecipe" class="danger">Delete</button>' : templateLocked ? '<button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">Save Draft</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
+          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="unpublishRecipe">Unpublish</button><button id="deleteRecipe" class="danger">Delete</button>' : templateLocked ? '<button id="exportTemplateRecipe">Export Template</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">Save Draft</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
           ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
           ${r.id && !publishedView && !templateLocked ? '<button id="makeTemplate">Make Template</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
           ${r.id && templateLocked ? '<button id="archiveRecipe" class="danger">Archive Template</button>' : ""}
@@ -1361,6 +1376,10 @@ function bindEditor() {
   content.querySelector("#editPublished")?.addEventListener("click", () => {
     renderEditor(state.currentRecipe.id, state.currentRecipe, "published-edit");
   });
+  content.querySelector("#unpublishRecipe")?.addEventListener("click", () => unpublishRecipeFromUi(state.currentRecipe.id));
+  content.querySelector("#exportTemplateRecipe")?.addEventListener("click", () => {
+    window.location.href = `/api/recipes/${state.currentRecipe.id}/template-export`;
+  });
   content.querySelector("#closeWithoutSaving")?.addEventListener("click", () => {
     if (!window.confirm("Close without saving changes?")) return;
     showToast("Closed without saving.");
@@ -1460,6 +1479,19 @@ async function renderImport() {
         <button class="primary">Upload and Preview</button>
       </form>
     </section>
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Import Template</h2>
+          <p class="helper">Load an exported recipe template file from another location. The imported recipe will be saved as a locked Template.</p>
+        </div>
+      </div>
+      <form id="templateImportForm" class="toolbar">
+        <input type="file" name="template" accept=".json,.recipe-template,.recipe-template.json,application/json,.pdf" required>
+        <button class="primary">Import Template File</button>
+      </form>
+      <p class="helper">Use the Export Template button on a template card. Printable PDFs can be saved for people, but the import needs the exported template data file.</p>
+    </section>
     ${ingredientOptionsMarkup()}
     <div id="previewArea"></div>
   `;
@@ -1469,6 +1501,13 @@ async function renderImport() {
     state.importPreview = await api("/api/import/xlsx", { method: "POST", body: form });
     state.selectedImportIndexes = new Set(state.importPreview.recipes.map((_, index) => index));
     renderImportPreview();
+  });
+  content.querySelector("#templateImportForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const template = await api("/api/templates/import", { method: "POST", body: form });
+    showToast(`${template.name} imported as a template.`);
+    renderDashboard("Template");
   });
 }
 
@@ -1710,7 +1749,7 @@ async function renderVersionCard(versionId) {
     ? theoreticalBatchGrams * 0.95
     : numeric(calculations.real_batch_grams);
   content.innerHTML = `
-    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="printIngredientsList">Printable Ingredients List</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
+    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="printIngredientsList">Printable Ingredients List</button><button id="unpublishCardRecipe">Unpublish</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
     <article class="card-page">
       <header class="section-header">
         <div>
@@ -1754,6 +1793,7 @@ async function renderVersionCard(versionId) {
     </article>
   `;
   content.querySelector("#printIngredientsList").addEventListener("click", () => renderPrintableIngredientList(version));
+  content.querySelector("#unpublishCardRecipe").addEventListener("click", () => unpublishRecipeFromUi(recipe.id, "Draft"));
   content.querySelector("#backCards").addEventListener("click", () => renderCards());
   content.querySelector("#deleteCardRecipe").addEventListener("click", async () => {
     if (!window.confirm("Delete this recipe and any published versions?")) return;

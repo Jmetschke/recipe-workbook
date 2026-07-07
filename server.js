@@ -12,6 +12,7 @@ const {
   createRecipe,
   updateRecipe,
   publishRecipe,
+  unpublishRecipe,
   duplicateRecipe,
   archiveRecipe,
   deleteRecipe,
@@ -38,6 +39,62 @@ app.use(express.static(path.join(__dirname, "public")));
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
+function safeTemplateFilename(recipe) {
+  const base = `${recipe.name || "recipe-template"}-${recipe.current_version || "template"}`
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+  return `${base || "recipe-template"}.recipe-template.json`;
+}
+
+function templateExportPayload(recipe) {
+  return {
+    file_type: "recipe_manager_template",
+    file_version: 1,
+    exported_at: new Date().toISOString(),
+    template: {
+      name: recipe.name,
+      product_type: recipe.product_type,
+      flavor: recipe.flavor,
+      recipe_card_type: recipe.recipe_card_type,
+      current_version: recipe.current_version,
+      batch_size: recipe.batch_size,
+      batch_size_mode: recipe.batch_size_mode,
+      batch_unit: recipe.batch_unit,
+      unit_weight: recipe.unit_weight,
+      unit_weight_unit: recipe.unit_weight_unit,
+      vape_unit_size: recipe.vape_unit_size,
+      target_mg_per_unit: recipe.target_mg_per_unit,
+      potency_percent: recipe.potency_percent,
+      expected_production_date: recipe.expected_production_date,
+      active_additives: recipe.active_additives || [],
+      ingredients: recipe.ingredients || [],
+      steps: recipe.steps || [],
+      notes: recipe.notes || []
+    }
+  };
+}
+
+function templateImportPayload(payload) {
+  const template = payload.template || payload.recipe || payload;
+  if (!template || !template.name || !Array.isArray(template.ingredients)) {
+    const error = new Error("Upload a valid recipe template export file.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    ...template,
+    id: undefined,
+    status: "Template",
+    has_unpublished_changes: false,
+    copied_from_recipe_id: null,
+    copy_lock_formula: true,
+    is_new_recipe_duplicate: false,
+    expected_production_date: template.expected_production_date || ""
+  };
 }
 
 app.get("/api/recipes", asyncRoute(async (req, res) => {
@@ -90,6 +147,12 @@ app.post("/api/recipes/:id/publish", asyncRoute(async (req, res) => {
   return res.json(recipe);
 }));
 
+app.post("/api/recipes/:id/unpublish", asyncRoute(async (req, res) => {
+  const recipe = await unpublishRecipe(req.params.id);
+  if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+  return res.json(recipe);
+}));
+
 app.get("/api/recipes/:id/versions", asyncRoute(async (req, res) => {
   res.json(await listVersions(req.params.id));
 }));
@@ -119,6 +182,31 @@ app.post("/api/import/confirm", asyncRoute(async (req, res) => {
     await markImportJobCreated(req.body.import_job_id, created[0].id);
   }
   return res.status(201).json({ recipes: created });
+}));
+
+app.get("/api/recipes/:id/template-export", asyncRoute(async (req, res) => {
+  const recipe = await getRecipe(req.params.id);
+  if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+  if (recipe.status !== "Template") return res.status(400).json({ error: "Only template recipes can be exported as template files." });
+  const filename = safeTemplateFilename(recipe);
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  return res.send(JSON.stringify(templateExportPayload(recipe), null, 2));
+}));
+
+app.post("/api/templates/import", upload.single("template"), asyncRoute(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Upload a recipe template export file." });
+  if (/\.pdf$/i.test(req.file.originalname || "")) {
+    return res.status(400).json({ error: "Printable PDFs cannot recreate editable template data. Use the exported .recipe-template.json file." });
+  }
+  let payload;
+  try {
+    payload = JSON.parse(req.file.buffer.toString("utf8"));
+  } catch (err) {
+    return res.status(400).json({ error: "Template import file must be valid JSON from Export Template." });
+  }
+  const recipe = await createRecipe(templateImportPayload(payload));
+  return res.status(201).json(recipe);
 }));
 
 app.get("/api/ingredients", asyncRoute(async (req, res) => {

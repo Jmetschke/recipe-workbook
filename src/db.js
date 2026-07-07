@@ -440,6 +440,17 @@ async function publishRecipe(id, publishedBy = "Production") {
   return getRecipe(id);
 }
 
+async function unpublishRecipe(id) {
+  const recipe = await getRecipe(id);
+  if (!recipe) return null;
+  if (recipe.status !== "Published") return recipe;
+  await execute(
+    "UPDATE recipes SET status = 'Draft', has_unpublished_changes = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [id]
+  );
+  return getRecipe(id);
+}
+
 async function deleteRecipe(id) {
   const info = await execute("DELETE FROM recipes WHERE id = ?", [id]);
   return Boolean(info.rowsAffected);
@@ -698,6 +709,7 @@ module.exports = {
   createRecipe,
   updateRecipe,
   publishRecipe,
+  unpublishRecipe,
   duplicateRecipe,
   archiveRecipe,
   deleteRecipe,
