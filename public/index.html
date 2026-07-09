@@ -26,6 +26,7 @@
       <button class="nav" data-view="cards">Published Cards</button>
       <button class="nav" data-view="archived">Archived</button>
       <button class="nav" data-view="ingredients">Ingredients</button>
+      <button class="nav" data-view="productionItems">Production Items</button>
       <button class="nav" data-view="settings">Settings</button>
       <div class="external-nav-group" aria-label="External web pages">
         <div class="external-nav-label">External Web Pages</div>
@@ -40,6 +41,19 @@
           <p id="pageSubtitle">Recipes, drafts, published cards, and import tools.</p>
         </div>
         <div class="top-actions">
+          <div class="tracker-nav" aria-label="Manufacturing tracker navigation">
+            <div class="tracker-toggle" role="group" aria-label="Choose manufacturing tracker location">
+              <label>
+                <input type="radio" name="trackerLocation" value="IL" checked>
+                <span>IL</span>
+              </label>
+              <label>
+                <input type="radio" name="trackerLocation" value="NY">
+                <span>NY</span>
+              </label>
+            </div>
+            <button id="trackerNavBtn" type="button">Open Tracker</button>
+          </div>
           <button id="newRecipeBtn" class="primary">New Recipe</button>
           <button id="importShortcutBtn">Import Spreadsheet</button>
         </div>

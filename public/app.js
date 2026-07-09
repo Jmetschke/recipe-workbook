@@ -13,6 +13,10 @@ const content = document.querySelector("#content");
 const title = document.querySelector("#pageTitle");
 const subtitle = document.querySelector("#pageSubtitle");
 const toast = document.querySelector("#toast");
+const trackerLinks = {
+  IL: "https://manufacturing-tracker.onrender.com",
+  NY: "https://manufacturing-tracker-ny.onrender.com"
+};
 
 function money(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -126,6 +130,7 @@ function normalizeVapeTerpenes(recipe = {}, terpeneTotalGrams = 0, finalBatchGra
       ingredient_name: row.ingredient_name || "",
       ingredient_index: row.ingredient_index ?? "",
       concentration_type: "terpene",
+      metrc_number: row.metrc_number || row.metrc || "",
       terpene_share_percent: sharePercent,
       recorded_percent: row.recorded_percent ?? row.potency_percent ?? "",
       potency_percent: row.recorded_percent ?? row.potency_percent ?? "",
@@ -197,6 +202,7 @@ function normalizeActiveAdditivesForCalculation(recipe, ingredients = [], estima
         ingredient_name: row.ingredient_name || "",
         ingredient_index: row.ingredient_index ?? "",
         concentration_type: "mg_per_unit",
+        metrc_number: row.metrc_number || row.metrc || "",
         mg_per_g: mgPerG || "",
         mg_per_unit: mgPerUnit || "",
         target_mg_per_unit: mgPerUnit || "",
@@ -231,6 +237,7 @@ function normalizeActiveAdditivesForCalculation(recipe, ingredients = [], estima
       ingredient_name: row.ingredient_name || "",
       ingredient_index: row.ingredient_index ?? "",
       concentration_type: "percent",
+      metrc_number: row.metrc_number || row.metrc || "",
       target_mg_per_unit: targetMg,
       potency_percent: potencyInput || "",
       mg_per_unit: row.mg_per_unit || "",
@@ -911,6 +918,7 @@ function newAdditiveCalculation(name = "", ingredientIndex = "") {
     ingredient_name: name,
     ingredient_index: ingredientIndex,
     concentration_type: "percent",
+    metrc_number: "",
     target_mg_per_unit: "",
     potency_percent: "",
     recorded_percent: "",
@@ -965,6 +973,10 @@ function additiveNumberInput(field, value, locked, disabled = false) {
   return `<input type="number" step="any" min="0" data-additive-field="${field}" value="${escapeHtml(value ?? "")}" ${locked ? "readonly" : ""} ${disabled ? "disabled" : ""}>`;
 }
 
+function additiveTextInput(field, value, locked, placeholder = "") {
+  return `<input data-additive-field="${field}" value="${escapeHtml(value ?? "")}" placeholder="${escapeHtml(placeholder)}" ${locked ? "readonly" : ""}>`;
+}
+
 function additiveUnitCountValue(row, calculated) {
   const explicit = row.unit_count === undefined || row.unit_count === null ? "" : row.unit_count;
   return numeric(explicit) > 0 ? explicit : calculated.calculated_unit_count || "";
@@ -995,6 +1007,8 @@ function renderActiveAdditiveTool(recipe, locked = false) {
               <tr>
                 <th>Terpene</th>
                 <th>% of terpene blend</th>
+                <th>% of formula</th>
+                <th>Metrc #</th>
                 <th>Calculated grams</th>
                 <th>Match to recipe ingredient</th>
                 <th></th>
@@ -1005,11 +1019,13 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                 <tr data-additive-index="${index}">
                   <td data-mobile-label="Terpene"><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
                   <td data-mobile-label="% of terpene blend"><input type="number" step="any" min="0" data-additive-field="terpene_share_percent" value="${escapeHtml(row.terpene_share_percent !== undefined && row.terpene_share_percent !== "" ? row.terpene_share_percent * 100 : row.recorded_percent ?? row.potency_percent ?? "")}" ${locked ? "readonly" : ""}></td>
+                  <td data-mobile-label="% of formula"><input class="calculated" readonly value="${pct(row.formula_percent)}"></td>
+                  <td data-mobile-label="Metrc #">${additiveTextInput("metrc_number", row.metrc_number || row.metrc || "", locked, "Optional")}</td>
                   <td data-mobile-label="Calculated grams"><input class="calculated" readonly value="${qty(row.calculated_grams)}"></td>
                   <td data-mobile-label="Match to ingredient"><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
                   <td data-mobile-label="Actions"><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
                 </tr>
-              `).join("") : '<tr><td colspan="5" class="helper">No terpene rows yet.</td></tr>'}
+              `).join("") : '<tr><td colspan="7" class="helper">No terpene rows yet.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -1040,6 +1056,8 @@ function renderActiveAdditiveTool(recipe, locked = false) {
             <tr>
               <th>Additive</th>
               <th>Basis</th>
+              <th>% of formula</th>
+              <th>Metrc #</th>
               <th>Target mg/unit</th>
               <th>Potency %</th>
               <th>mg/g concentrate</th>
@@ -1061,6 +1079,8 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                   return `
                     <td data-mobile-label="Additive"><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
                     <td data-mobile-label="Basis"><select data-additive-field="concentration_type" ${locked ? "disabled" : ""}>${concentrationTypeOptions(type)}</select></td>
+                    <td data-mobile-label="% of formula"><input class="calculated" readonly value="${pct(calculated.formula_percent)}"></td>
+                    <td data-mobile-label="Metrc #">${additiveTextInput("metrc_number", row.metrc_number || row.metrc || "", locked, "Optional")}</td>
                     <td data-mobile-label="${type === "percent" ? "Target mg/unit" : "Mg/unit"}">${type === "percent" ? additiveNumberInput("target_mg_per_unit", row.target_mg_per_unit, locked) : additiveNumberInput("mg_per_unit", row.mg_per_unit ?? row.target_mg_per_unit, locked)}</td>
                     <td data-mobile-label="Potency %">${type === "percent" ? additiveNumberInput("potency_percent", row.potency_percent, locked) : '<input class="calculated" readonly value="">'} </td>
                     <td data-mobile-label="mg/g concentrate">${type === "mg_per_unit" ? additiveNumberInput("mg_per_g", row.mg_per_g, locked) : '<input class="calculated" readonly value="">'} </td>
@@ -1074,7 +1094,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                 <td data-mobile-label="Match to ingredient"><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
                 <td data-mobile-label="Actions"><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
               </tr>
-            `).join("") : '<tr><td colspan="12" class="helper">No additive calculations yet.</td></tr>'}
+            `).join("") : '<tr><td colspan="14" class="helper">No additive calculations yet.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1538,12 +1558,13 @@ function renderImportPreview() {
           ${(recipe.active_additives || []).length ? `
             <div class="table-wrap active-additive-wrap">
               <table class="active-additive-table">
-                <thead><tr><th>Additive</th><th>Basis</th><th>Target mg/unit</th><th>Potency %</th><th>mg/g concentrate</th><th>g/unit</th><th>Units</th><th>Match to recipe ingredient</th></tr></thead>
+                <thead><tr><th>Additive</th><th>Basis</th><th>Metrc #</th><th>Target mg/unit</th><th>Potency %</th><th>mg/g concentrate</th><th>g/unit</th><th>Units</th><th>Match to recipe ingredient</th></tr></thead>
                 <tbody>
                   ${(recipe.active_additives || []).map((row, additiveIndex) => `
                     <tr>
                       <td><select data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="ingredient_name">${ingredientNameOptions(row.ingredient_name || "")}</select></td>
                       <td><select data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="concentration_type">${concentrationTypeOptions(row.concentration_type || "percent")}</select></td>
+                      <td><input data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="metrc_number" value="${escapeHtml(row.metrc_number || row.metrc || "")}" placeholder="Optional"></td>
                       <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="${row.concentration_type === "mg_per_unit" ? "mg_per_unit" : "target_mg_per_unit"}" value="${escapeHtml(row.concentration_type === "mg_per_unit" ? row.mg_per_unit ?? row.target_mg_per_unit ?? "" : row.target_mg_per_unit ?? "")}"></td>
                       <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="potency_percent" value="${escapeHtml(row.potency_percent ?? "")}" ${row.concentration_type === "mg_per_unit" ? "disabled" : ""}></td>
                       <td><input type="number" step="any" data-import-additive="${index}" data-additive-index="${additiveIndex}" data-additive-field="mg_per_g" value="${escapeHtml(row.mg_per_g ?? "")}" ${row.concentration_type === "mg_per_unit" ? "" : "disabled"}></td>
@@ -1781,6 +1802,13 @@ async function renderVersionCard(versionId) {
       ${recipe.recipe_card_type === "Vape"
         ? `<p>Vape terpene totals: ${qty(calculations.terpene_total_grams)} grams terpenes for ${pct(calculations.terpene_percent)} of a ${qty(calculations.final_batch_grams)} gram theoretical final batch.</p>`
         : `<p>Active/additive totals: ${qty(calculations.active_mass_per_unit_mg)} mg physical additive per unit across ${(calculations.active_additives || []).length} additive calculation(s); ${qty(calculations.active_ingredient_grams)} grams total additive.</p>`}
+      ${(calculations.active_additives || []).length ? `
+        <h2>Additive Stats</h2>
+        <table>
+          <thead><tr><th>Additive</th><th>Basis</th><th>% of Formula</th><th>Metrc #</th><th>Calculated Grams</th></tr></thead>
+          <tbody>${(calculations.active_additives || []).map((row) => `<tr><td>${escapeHtml(row.ingredient_name || "")}</td><td>${escapeHtml(row.concentration_type || "")}</td><td>${pct(row.formula_percent)}</td><td>${escapeHtml(row.metrc_number || row.metrc || "")}</td><td>${qty(row.calculated_grams || 0)}</td></tr>`).join("")}</tbody>
+        </table>
+      ` : ""}
       ${(calculations.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
       <h2>SOP / Process Instructions</h2>
       <ol>${version.steps.map((step) => `<li>${step.instruction_text}</li>`).join("")}</ol>
@@ -1920,6 +1948,91 @@ async function renderIngredients() {
   });
 }
 
+async function renderProductionItems() {
+  state.view = "productionItems";
+  setPage("Production Items", "Add and review finished production items for this location.");
+  const items = await api("/api/production-items");
+  content.innerHTML = `
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Add Production Item</h2>
+          <p class="helper">Use this list for finished products that production will make at this location.</p>
+        </div>
+      </div>
+      <form id="productionItemForm">
+        <div class="grid">
+          <label>Item name
+            <input name="item_name" required placeholder="Finished product name">
+          </label>
+          <label>Recipe card type
+            <select name="recipe_card_type">
+              <option>Edible/Topical</option>
+              <option>Vape</option>
+            </select>
+          </label>
+          <label>Product type
+            <input name="product_type" placeholder="Gummy, topical, vape, etc.">
+          </label>
+          <label>Flavor
+            <input name="flavor" placeholder="Flavor or variant">
+          </label>
+          <label>SKU / item code
+            <input name="sku" placeholder="Internal SKU">
+          </label>
+          <label>Default batch size
+            <input name="default_batch_size" type="number" step="any" min="0" value="0">
+          </label>
+          <label>Batch unit
+            <input name="default_batch_unit" value="grams">
+          </label>
+          <label>Default unit weight
+            <input name="default_unit_weight" type="number" step="any" min="0" value="0">
+          </label>
+          <label>Unit weight unit
+            <input name="unit_weight_unit" value="grams">
+          </label>
+          <label>Location
+            <input name="location" placeholder="IL, NY, or facility name">
+          </label>
+          <label>Source
+            <input name="source" value="Manual Entry">
+          </label>
+        </div>
+        <label class="full-field">Notes
+          <textarea name="notes" placeholder="Internal production notes"></textarea>
+        </label>
+        <div class="toolbar">
+          <button class="primary" type="submit">Save Production Item</button>
+          <button type="reset">Clear</button>
+        </div>
+      </form>
+    </section>
+    <section class="section">
+      <div class="section-header">
+        <h2>Production Item List</h2>
+        <span class="helper">${items.length} items</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Card type</th><th>Product type</th><th>Flavor</th><th>SKU</th><th>Batch size</th><th>Unit weight</th><th>Location</th><th>Source</th><th>Notes</th></tr></thead>
+          <tbody>${items.map((item) => `<tr><td>${escapeHtml(item.item_name)}</td><td>${escapeHtml(item.recipe_card_type || "Edible/Topical")}</td><td>${escapeHtml(item.product_type || "")}</td><td>${escapeHtml(item.flavor || "")}</td><td>${escapeHtml(item.sku || "")}</td><td>${qty(item.default_batch_size || 0)} ${escapeHtml(item.default_batch_unit || "")}</td><td>${qty(item.default_unit_weight || 0)} ${escapeHtml(item.unit_weight_unit || "")}</td><td>${escapeHtml(item.location || "")}</td><td>${escapeHtml(item.source || "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+  content.querySelector("#productionItemForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries());
+    payload.default_batch_size = Number(payload.default_batch_size || 0);
+    payload.default_unit_weight = Number(payload.default_unit_weight || 0);
+    const saved = await api("/api/production-items", { method: "POST", body: payload });
+    showToast(`${saved.item_name} added to production items.`);
+    await renderProductionItems();
+  });
+}
+
 async function renderSettings() {
   state.view = "settings";
   setPage("Settings", "Production calculation limits and future deployment settings.");
@@ -1950,11 +2063,16 @@ document.querySelectorAll(".nav").forEach((button) => button.addEventListener("c
   if (button.dataset.view === "cards") renderCards();
   if (button.dataset.view === "archived") renderDashboard("Archived");
   if (button.dataset.view === "ingredients") renderIngredients();
+  if (button.dataset.view === "productionItems") renderProductionItems();
   if (button.dataset.view === "settings") renderSettings();
 }));
 
 document.querySelector("#newRecipeBtn").addEventListener("click", () => renderNewRecipeChoice());
 document.querySelector("#importShortcutBtn").addEventListener("click", () => renderImport());
+document.querySelector("#trackerNavBtn").addEventListener("click", () => {
+  const selected = document.querySelector('input[name="trackerLocation"]:checked')?.value || "IL";
+  window.open(trackerLinks[selected] || trackerLinks.IL, "_blank", "noopener,noreferrer");
+});
 
 // Register the PWA service worker after the app starts; API calls remain live because the worker skips /api routes.
 if ("serviceWorker" in navigator) {

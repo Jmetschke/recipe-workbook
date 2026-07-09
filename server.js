@@ -23,6 +23,9 @@ const {
   upsertMasterIngredients,
   listIngredients,
   getIngredient,
+  upsertProductionItems,
+  listProductionItems,
+  getProductionItem,
   getSettings,
   saveSettings
 } = require("./src/db");
@@ -231,6 +234,31 @@ app.post("/api/ingredients", asyncRoute(async (req, res) => {
     notes: req.body.notes
   }]);
   return res.status(201).json(await getIngredient(String(req.body.ingredient_name).trim()));
+}));
+
+app.get("/api/production-items", asyncRoute(async (req, res) => {
+  res.json(await listProductionItems());
+}));
+
+app.post("/api/production-items", asyncRoute(async (req, res) => {
+  if (!req.body.item_name || !String(req.body.item_name).trim()) {
+    return res.status(400).json({ error: "Production item name is required." });
+  }
+  await upsertProductionItems([{
+    item_name: String(req.body.item_name).trim(),
+    recipe_card_type: req.body.recipe_card_type,
+    product_type: req.body.product_type,
+    flavor: req.body.flavor,
+    sku: req.body.sku,
+    default_batch_size: req.body.default_batch_size,
+    default_batch_unit: req.body.default_batch_unit,
+    default_unit_weight: req.body.default_unit_weight,
+    unit_weight_unit: req.body.unit_weight_unit,
+    location: req.body.location,
+    source: req.body.source || "Manual Entry",
+    notes: req.body.notes
+  }]);
+  return res.status(201).json(await getProductionItem(String(req.body.item_name).trim()));
 }));
 
 app.get("/api/settings", asyncRoute(async (req, res) => {

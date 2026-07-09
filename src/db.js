@@ -118,6 +118,23 @@ async function migrate() {
       source TEXT DEFAULT '',
       notes TEXT DEFAULT ''
     )`,
+    `CREATE TABLE IF NOT EXISTS production_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_name TEXT NOT NULL UNIQUE,
+      recipe_card_type TEXT DEFAULT 'Edible/Topical',
+      product_type TEXT DEFAULT '',
+      flavor TEXT DEFAULT '',
+      sku TEXT DEFAULT '',
+      default_batch_size REAL DEFAULT 0,
+      default_batch_unit TEXT DEFAULT 'grams',
+      default_unit_weight REAL DEFAULT 0,
+      unit_weight_unit TEXT DEFAULT 'grams',
+      location TEXT DEFAULT '',
+      source TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
     `CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -140,6 +157,9 @@ async function migrate() {
   await addColumnIfMissing("ingredients_master", "unit_of_measure", "TEXT DEFAULT ''");
   await addColumnIfMissing("ingredients_master", "grams_conversion", "REAL DEFAULT 1");
   await addColumnIfMissing("ingredients_master", "default_grams_conversion", "REAL DEFAULT 1");
+  await addColumnIfMissing("production_items", "recipe_card_type", "TEXT DEFAULT 'Edible/Topical'");
+  await addColumnIfMissing("production_items", "default_unit_weight", "REAL DEFAULT 0");
+  await addColumnIfMissing("production_items", "unit_weight_unit", "TEXT DEFAULT 'grams'");
   await addColumnIfMissing("recipes", "expected_production_date", "TEXT DEFAULT ''");
   await addColumnIfMissing("recipes", "recipe_card_type", "TEXT DEFAULT 'Edible/Topical'");
   await addColumnIfMissing("recipes", "batch_size_mode", "TEXT DEFAULT 'grams'");
@@ -576,6 +596,53 @@ async function getIngredient(name) {
   return get("SELECT * FROM ingredients_master WHERE ingredient_name = ?", [name]);
 }
 
+async function upsertProductionItems(items = []) {
+  for (const item of items.filter((entry) => entry.item_name)) {
+    await execute(
+      `INSERT INTO production_items (
+        item_name, recipe_card_type, product_type, flavor, sku, default_batch_size, default_batch_unit,
+        default_unit_weight, unit_weight_unit, location, source, notes
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(item_name) DO UPDATE SET
+        recipe_card_type = excluded.recipe_card_type,
+        product_type = excluded.product_type,
+        flavor = excluded.flavor,
+        sku = excluded.sku,
+        default_batch_size = excluded.default_batch_size,
+        default_batch_unit = excluded.default_batch_unit,
+        default_unit_weight = excluded.default_unit_weight,
+        unit_weight_unit = excluded.unit_weight_unit,
+        location = excluded.location,
+        source = excluded.source,
+        notes = excluded.notes,
+        updated_at = CURRENT_TIMESTAMP`,
+      [
+        item.item_name,
+        item.recipe_card_type === "Vape" ? "Vape" : "Edible/Topical",
+        item.product_type || "",
+        item.flavor || "",
+        item.sku || "",
+        item.default_batch_size || 0,
+        item.default_batch_unit || "grams",
+        item.default_unit_weight || 0,
+        item.unit_weight_unit || "grams",
+        item.location || "",
+        item.source || "Manual Entry",
+        item.notes || ""
+      ]
+    );
+  }
+}
+
+async function listProductionItems() {
+  return all("SELECT * FROM production_items ORDER BY item_name");
+}
+
+async function getProductionItem(name) {
+  return get("SELECT * FROM production_items WHERE item_name = ?", [name]);
+}
+
 async function getSettings() {
   return allSettings();
 }
@@ -720,6 +787,9 @@ module.exports = {
   upsertMasterIngredients,
   listIngredients,
   getIngredient,
+  upsertProductionItems,
+  listProductionItems,
+  getProductionItem,
   getSettings,
   saveSettings
 };
