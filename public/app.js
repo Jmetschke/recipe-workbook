@@ -26,6 +26,11 @@ function pct(value) {
   return `${(Number(value || 0) * 100).toFixed(2)}%`;
 }
 
+function enteredPercent(value) {
+  if (value === undefined || value === null || value === "") return "";
+  return `${(normalizePercentInput(value) * 100).toFixed(2)}%`;
+}
+
 function qty(value) {
   return Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
@@ -1007,7 +1012,6 @@ function renderActiveAdditiveTool(recipe, locked = false) {
               <tr>
                 <th>Terpene</th>
                 <th>% of terpene blend</th>
-                <th>% of formula</th>
                 <th>Metrc #</th>
                 <th>Calculated grams</th>
                 <th>Match to recipe ingredient</th>
@@ -1019,13 +1023,12 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                 <tr data-additive-index="${index}">
                   <td data-mobile-label="Terpene"><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
                   <td data-mobile-label="% of terpene blend"><input type="number" step="any" min="0" data-additive-field="terpene_share_percent" value="${escapeHtml(row.terpene_share_percent !== undefined && row.terpene_share_percent !== "" ? row.terpene_share_percent * 100 : row.recorded_percent ?? row.potency_percent ?? "")}" ${locked ? "readonly" : ""}></td>
-                  <td data-mobile-label="% of formula"><input class="calculated" readonly value="${pct(row.formula_percent)}"></td>
                   <td data-mobile-label="Metrc #">${additiveTextInput("metrc_number", row.metrc_number || row.metrc || "", locked, "Optional")}</td>
                   <td data-mobile-label="Calculated grams"><input class="calculated" readonly value="${qty(row.calculated_grams)}"></td>
                   <td data-mobile-label="Match to ingredient"><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
                   <td data-mobile-label="Actions"><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
                 </tr>
-              `).join("") : '<tr><td colspan="7" class="helper">No terpene rows yet.</td></tr>'}
+              `).join("") : '<tr><td colspan="6" class="helper">No terpene rows yet.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -1056,7 +1059,6 @@ function renderActiveAdditiveTool(recipe, locked = false) {
             <tr>
               <th>Additive</th>
               <th>Basis</th>
-              <th>% of formula</th>
               <th>Metrc #</th>
               <th>Target mg/unit</th>
               <th>Potency %</th>
@@ -1079,7 +1081,6 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                   return `
                     <td data-mobile-label="Additive"><select data-additive-field="ingredient_name" ${locked ? "disabled" : ""}>${ingredientNameOptions(row.ingredient_name || "")}</select></td>
                     <td data-mobile-label="Basis"><select data-additive-field="concentration_type" ${locked ? "disabled" : ""}>${concentrationTypeOptions(type)}</select></td>
-                    <td data-mobile-label="% of formula"><input class="calculated" readonly value="${pct(calculated.formula_percent)}"></td>
                     <td data-mobile-label="Metrc #">${additiveTextInput("metrc_number", row.metrc_number || row.metrc || "", locked, "Optional")}</td>
                     <td data-mobile-label="${type === "percent" ? "Target mg/unit" : "Mg/unit"}">${type === "percent" ? additiveNumberInput("target_mg_per_unit", row.target_mg_per_unit, locked) : additiveNumberInput("mg_per_unit", row.mg_per_unit ?? row.target_mg_per_unit, locked)}</td>
                     <td data-mobile-label="Potency %">${type === "percent" ? additiveNumberInput("potency_percent", row.potency_percent, locked) : '<input class="calculated" readonly value="">'} </td>
@@ -1094,7 +1095,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
                 <td data-mobile-label="Match to ingredient"><select data-additive-field="ingredient_index" ${locked || !state.currentRecipe.ingredients.length ? "disabled" : ""}>${existingIngredientOptions(row.ingredient_index ?? "")}</select></td>
                 <td data-mobile-label="Actions"><button class="danger" data-remove-additive="${index}" ${locked ? "disabled" : ""}>Delete</button></td>
               </tr>
-            `).join("") : '<tr><td colspan="14" class="helper">No additive calculations yet.</td></tr>'}
+            `).join("") : '<tr><td colspan="13" class="helper">No additive calculations yet.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1805,8 +1806,8 @@ async function renderVersionCard(versionId) {
       ${(calculations.active_additives || []).length ? `
         <h2>Additive Stats</h2>
         <table>
-          <thead><tr><th>Additive</th><th>Basis</th><th>% of Formula</th><th>Metrc #</th><th>Calculated Grams</th></tr></thead>
-          <tbody>${(calculations.active_additives || []).map((row) => `<tr><td>${escapeHtml(row.ingredient_name || "")}</td><td>${escapeHtml(row.concentration_type || "")}</td><td>${pct(row.formula_percent)}</td><td>${escapeHtml(row.metrc_number || row.metrc || "")}</td><td>${qty(row.calculated_grams || 0)}</td></tr>`).join("")}</tbody>
+          <thead><tr><th>Additive</th><th>Basis</th><th>% of Additive</th><th>Metrc #</th><th>Calculated Grams</th></tr></thead>
+          <tbody>${(calculations.active_additives || []).map((row) => `<tr><td>${escapeHtml(row.ingredient_name || "")}</td><td>${escapeHtml(row.concentration_type || "")}</td><td>${enteredPercent(row.potency_percent || row.recorded_percent)}</td><td>${escapeHtml(row.metrc_number || row.metrc || "")}</td><td>${qty(row.calculated_grams || 0)}</td></tr>`).join("")}</tbody>
         </table>
       ` : ""}
       ${(calculations.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
