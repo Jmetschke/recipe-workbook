@@ -22,6 +22,67 @@ body {
   min-height: 100vh;
 }
 
+.location-nav {
+  align-items: center;
+  background: #0e1822;
+  display: flex;
+  gap: 16px;
+  min-height: 72px;
+  padding: 12px 20px;
+  position: relative;
+  z-index: 30;
+}
+
+.location-nav__toggle {
+  background: #233445;
+  border: 1px solid #40566b;
+  border-radius: 8px;
+  display: flex;
+  flex: 0 0 auto;
+  padding: 3px;
+}
+
+.location-nav__toggle-button {
+  background: transparent;
+  border: 0;
+  color: #b9cad9;
+  font-weight: 800;
+  min-width: 48px;
+}
+
+.location-nav__toggle-button.active,
+.location-nav__toggle-button:hover,
+.location-nav__toggle-button:focus-visible {
+  background: var(--blue);
+  color: #fff;
+}
+
+.location-nav__links {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.location-nav__links[hidden] {
+  display: none;
+}
+
+.location-nav__links a {
+  border: 1px solid #40566b;
+  border-radius: 6px;
+  color: #e9f3fb;
+  padding: 9px 12px;
+  text-decoration: none;
+}
+
+.location-nav__links a:hover,
+.location-nav__links a:focus-visible {
+  background: #2d4358;
+  border-color: #e9f3fb;
+  color: #fff;
+}
+
 button,
 input,
 select,
@@ -51,7 +112,7 @@ button.danger,
 
 .sidebar {
   position: fixed;
-  inset: 0 auto 0 0;
+  inset: 72px auto 0 0;
   width: 230px;
   background: #15202b;
   color: #fff;
@@ -92,83 +153,11 @@ button.danger,
   color: #fff;
 }
 
-.external-nav-group {
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
-  margin-top: 18px;
-  padding-top: 14px;
-}
-
-.external-nav-label {
-  color: #9fb4c8;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  margin: 0 8px 8px;
-  text-transform: uppercase;
-}
-
-.external-nav {
-  border: 1px solid rgba(159, 180, 200, 0.45);
-  border-radius: 6px;
-  color: #e9f3fb;
-  display: block;
-  margin: 6px 0;
-  padding: 9px 12px;
-  text-decoration: none;
-}
-
-.external-nav:hover,
-.external-nav:focus {
-  background: #2d4358;
-  border-color: #e9f3fb;
-  color: #fff;
-}
-
 .top-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
-}
-
-.tracker-nav {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-
-.tracker-toggle {
-  background: #edf4f7;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: flex;
-  padding: 3px;
-}
-
-.tracker-toggle label {
-  color: var(--muted);
-  cursor: pointer;
-  display: block;
-  font-weight: 800;
-}
-
-.tracker-toggle input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.tracker-toggle span {
-  border-radius: 6px;
-  display: block;
-  min-width: 42px;
-  padding: 7px 10px;
-  text-align: center;
-}
-
-.tracker-toggle input:checked + span {
-  background: var(--blue);
-  color: #fff;
 }
 
 .app {
@@ -618,6 +607,25 @@ input[readonly] {
 }
 
 @media (max-width: 900px) {
+  .location-nav {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .location-nav__links {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .location-nav__links a {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
   .sidebar {
     position: sticky;
     top: 0;
@@ -629,6 +637,7 @@ input[readonly] {
     overflow-x: auto;
     padding: 10px 12px;
     scrollbar-width: thin;
+    inset: auto;
   }
 
   @supports (padding: env(safe-area-inset-top)) {
@@ -658,29 +667,6 @@ input[readonly] {
   .nav.active,
   .nav:hover {
     background: #2d4358;
-  }
-
-  .external-nav-group {
-    align-items: center;
-    border-left: 1px solid rgba(255, 255, 255, 0.18);
-    border-top: 0;
-    display: flex;
-    flex: 0 0 auto;
-    gap: 8px;
-    margin: 0 0 0 4px;
-    padding: 0 0 0 12px;
-  }
-
-  .external-nav-label {
-    margin: 0;
-    white-space: nowrap;
-  }
-
-  .external-nav {
-    flex: 0 0 auto;
-    margin: 0;
-    padding: 8px 11px;
-    white-space: nowrap;
   }
 
   .app {
@@ -740,15 +726,6 @@ input[readonly] {
     font-size: 14px;
   }
 
-  .external-nav-label {
-    font-size: 11px;
-  }
-
-  .external-nav {
-    font-size: 14px;
-    padding: 8px 10px;
-  }
-
   .topbar,
   .section-header,
   .toolbar {
@@ -768,21 +745,6 @@ input[readonly] {
   .top-actions {
     display: grid;
     grid-template-columns: 1fr;
-  }
-
-  .tracker-nav {
-    align-items: stretch;
-    display: grid;
-    gap: 8px;
-    grid-template-columns: 1fr;
-  }
-
-  .tracker-toggle {
-    width: 100%;
-  }
-
-  .tracker-toggle label {
-    flex: 1;
   }
 
   button,

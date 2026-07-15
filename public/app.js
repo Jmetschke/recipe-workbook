@@ -13,10 +13,6 @@ const content = document.querySelector("#content");
 const title = document.querySelector("#pageTitle");
 const subtitle = document.querySelector("#pageSubtitle");
 const toast = document.querySelector("#toast");
-const trackerLinks = {
-  IL: "https://manufacturing-tracker.onrender.com",
-  NY: "https://manufacturing-tracker-ny.onrender.com"
-};
 
 function money(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -2070,9 +2066,18 @@ document.querySelectorAll(".nav").forEach((button) => button.addEventListener("c
 
 document.querySelector("#newRecipeBtn").addEventListener("click", () => renderNewRecipeChoice());
 document.querySelector("#importShortcutBtn").addEventListener("click", () => renderImport());
-document.querySelector("#trackerNavBtn").addEventListener("click", () => {
-  const selected = document.querySelector('input[name="trackerLocation"]:checked')?.value || "IL";
-  window.open(trackerLinks[selected] || trackerLinks.IL, "_blank", "noopener,noreferrer");
+document.querySelectorAll(".location-nav__toggle-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    const selectedLocation = button.dataset.location;
+    document.querySelectorAll(".location-nav__toggle-button").forEach((toggleButton) => {
+      const isSelected = toggleButton.dataset.location === selectedLocation;
+      toggleButton.classList.toggle("active", isSelected);
+      toggleButton.setAttribute("aria-pressed", String(isSelected));
+    });
+    document.querySelectorAll("[data-location-links]").forEach((linkGroup) => {
+      linkGroup.hidden = linkGroup.dataset.locationLinks !== selectedLocation;
+    });
+  });
 });
 
 // Register the PWA service worker after the app starts; API calls remain live because the worker skips /api routes.

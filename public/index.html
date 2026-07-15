@@ -18,6 +18,24 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
+    <nav class="location-nav" aria-label="Company tools">
+      <div class="location-nav__toggle" role="group" aria-label="Choose location">
+        <button class="location-nav__toggle-button active" type="button" data-location="IL" aria-pressed="true">IL</button>
+        <button class="location-nav__toggle-button" type="button" data-location="NY" aria-pressed="false">NY</button>
+      </div>
+      <div class="location-nav__links" data-location-links="IL" aria-label="Illinois tools">
+        <a href="https://manufacturing-tracker.onrender.com">Production Tracker IL</a>
+        <a href="https://velocity-tracker-zc5x.onrender.com">Velocity Tracker IL</a>
+        <a href="https://recipe-workbook.onrender.com">Recipe Tracker IL</a>
+        <a href="https://ingredient-projection-workbook.onrender.com">Ingredient Tracker IL</a>
+      </div>
+      <div class="location-nav__links" data-location-links="NY" aria-label="New York tools" hidden>
+        <a href="https://manufacturing-tracker-ny.onrender.com">Production Tracker NY</a>
+        <a href="https://ingredient-projection-workbook-ny.onrender.com">Ingredient Tracker NY</a>
+        <a href="https://velocity-tracker-ny.onrender.com">Velocity Tracker NY</a>
+        <a href="https://recipe-workbook-ny.onrender.com">Recipe Tracker NY</a>
+      </div>
+    </nav>
     <aside class="sidebar">
       <div class="brand">Recipe Manager</div>
       <button class="nav active" data-view="dashboard">Dashboard</button>
@@ -28,11 +46,6 @@
       <button class="nav" data-view="ingredients">Ingredients</button>
       <button class="nav" data-view="productionItems">Production Items</button>
       <button class="nav" data-view="settings">Settings</button>
-      <div class="external-nav-group" aria-label="External web pages">
-        <div class="external-nav-label">External Web Pages</div>
-        <a class="external-nav" href="https://manufacturing-tracker.onrender.com" target="_blank" rel="noopener noreferrer">Time Tracker ↗</a>
-        <a class="external-nav" href="https://ingredient-projection-workbook.onrender.com" target="_blank" rel="noopener noreferrer">Ingredient Workbook ↗</a>
-      </div>
     </aside>
     <main class="app">
       <header class="topbar">
@@ -41,19 +54,6 @@
           <p id="pageSubtitle">Recipes, drafts, published cards, and import tools.</p>
         </div>
         <div class="top-actions">
-          <div class="tracker-nav" aria-label="Manufacturing tracker navigation">
-            <div class="tracker-toggle" role="group" aria-label="Choose manufacturing tracker location">
-              <label>
-                <input type="radio" name="trackerLocation" value="IL" checked>
-                <span>IL</span>
-              </label>
-              <label>
-                <input type="radio" name="trackerLocation" value="NY">
-                <span>NY</span>
-              </label>
-            </div>
-            <button id="trackerNavBtn" type="button">Open Tracker</button>
-          </div>
           <button id="newRecipeBtn" class="primary">New Recipe</button>
           <button id="importShortcutBtn">Import Spreadsheet</button>
         </div>
