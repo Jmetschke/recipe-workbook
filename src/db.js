@@ -357,23 +357,11 @@ async function createRecipe(input) {
 async function updateRecipe(id, input) {
   const existing = await getRecipe(id);
   if (!existing) return null;
-  if (existing.status === "Template" && input.status !== "Archived") {
-    const error = new Error("Templates are locked. Start a new recipe from the template and save a new template instead.");
-    error.statusCode = 400;
-    throw error;
-  }
   const next = { ...existing, ...input };
   const incomingIngredients = input.ingredients || existing.ingredients;
-  const ingredientsForCalculation = existing.status === "Published"
-    ? incomingIngredients.map((item, index) => ({
-      ...item,
-      formula_qty: existing.ingredients[index]?.formula_qty ?? item.formula_qty,
-      formula_percent: existing.ingredients[index]?.formula_percent ?? item.formula_percent,
-      batch_qty: ""
-    }))
-    : incomingIngredients.map((item) => ({ ...item, batch_qty: "" }));
+  const ingredientsForCalculation = incomingIngredients.map((item) => ({ ...item, batch_qty: "" }));
   const calculations = await calculateWithActiveMatches(next, ingredientsForCalculation);
-  const publishedDirty = existing.status === "Published" || existing.current_version;
+  const publishedDirty = existing.status === "Draft" && Boolean(existing.current_version);
   await execute(
     `UPDATE recipes SET
       name = ?, product_type = ?, flavor = ?, recipe_card_type = ?, status = ?, current_version = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
