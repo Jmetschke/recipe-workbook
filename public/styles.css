@@ -407,6 +407,18 @@ input[readonly] {
   border-radius: 6px;
   background: #fff;
   padding: 6px;
+  cursor: pointer;
+}
+
+.mini-calendar-cell:hover,
+.mini-calendar-cell:focus-visible {
+  border-color: var(--blue);
+  outline: none;
+}
+
+.mini-calendar-cell.selected {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(36, 107, 143, 0.22);
 }
 
 .mini-calendar-recipe {
@@ -420,6 +432,31 @@ input[readonly] {
   background: #eef8fb;
   font-size: 12px;
   text-align: left;
+}
+
+.calendar-more {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+  padding: 3px 0;
+}
+
+.dashboard-day-details {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.dashboard-day-recipes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
 }
 
 .match-review td {

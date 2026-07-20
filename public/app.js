@@ -6,7 +6,8 @@ const state = {
   editorMode: "draft",
   importPreview: null,
   selectedImportIndexes: new Set(),
-  dashboardWindowStartKey: null
+  dashboardWindowStartKey: null,
+  selectedDashboardDate: null
 };
 
 const content = document.querySelector("#content");
@@ -619,14 +620,34 @@ function renderDashboardMiniCalendar(recipes = []) {
   for (let dayOffset = 0; dayOffset < 28; dayOffset += 1) {
     const date = localDateKey(addDays(windowStart, dayOffset));
     const dayRecipes = byDate.get(date) || [];
+    const selected = state.selectedDashboardDate === date;
     cells.push(`
-      <div class="mini-calendar-cell">
+      <div class="mini-calendar-cell ${selected ? "selected" : ""}" data-dashboard-calendar-day="${date}" role="button" tabindex="0" aria-label="Show all recipes for ${shortDateLabel(date)}" aria-pressed="${selected}">
         <div class="calendar-day">${shortDateLabel(date)}</div>
         ${dayRecipes.slice(0, 2).map((recipe) => `<button class="mini-calendar-recipe" data-mini-card-recipe="${recipe.id}">${escapeHtml(recipe.name)}</button>`).join("")}
-        ${dayRecipes.length > 2 ? `<span class="helper">+${dayRecipes.length - 2} more</span>` : ""}
+        ${dayRecipes.length > 2 ? `<button class="calendar-more" data-dashboard-calendar-more="${date}">+${dayRecipes.length - 2} more</button>` : ""}
       </div>
     `);
   }
+  const selectedRecipes = state.selectedDashboardDate ? byDate.get(state.selectedDashboardDate) || [] : [];
+  const selectedDay = state.selectedDashboardDate && state.selectedDashboardDate >= windowStartKey && state.selectedDashboardDate <= windowEndKey
+    ? `
+      <div class="dashboard-day-details">
+        <div class="section-header">
+          <h3>${shortDateLabel(state.selectedDashboardDate)}</h3>
+          <span class="helper">${selectedRecipes.length} published recipe${selectedRecipes.length === 1 ? "" : "s"}</span>
+        </div>
+        ${selectedRecipes.length
+          ? `<div class="dashboard-day-recipes">${selectedRecipes.map((recipe) => `
+              <button class="calendar-recipe" data-mini-card-recipe="${recipe.id}">
+                <strong>${escapeHtml(recipe.name)}</strong>
+                <span>${escapeHtml(recipe.current_version || "")}</span>
+              </button>
+            `).join("")}</div>`
+          : '<p class="helper">No published recipes scheduled for this day.</p>'}
+      </div>
+    `
+    : "";
   return `
     <section class="mini-calendar-section" id="dashboardMiniCalendar">
       <div class="section-header">
@@ -642,6 +663,7 @@ function renderDashboardMiniCalendar(recipes = []) {
         </div>
       </div>
       <div class="mini-calendar-grid">${cells.join("")}</div>
+      ${selectedDay}
     </section>
   `;
 }
@@ -659,6 +681,21 @@ function refreshDashboardMiniCalendar() {
 
 function bindMiniCalendarButtons() {
   content.querySelectorAll("[data-mini-card-recipe]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.miniCardRecipe)));
+  content.querySelectorAll("[data-dashboard-calendar-day]").forEach((cell) => {
+    const selectDay = () => {
+      state.selectedDashboardDate = cell.dataset.dashboardCalendarDay;
+      refreshDashboardMiniCalendar();
+    };
+    cell.addEventListener("click", (event) => {
+      if (event.target.closest("[data-mini-card-recipe]")) return;
+      selectDay();
+    });
+    cell.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectDay();
+    });
+  });
   content.querySelector("[data-view-full-calendar]")?.addEventListener("click", () => renderCards());
   content.querySelectorAll("[data-dashboard-calendar-shift]").forEach((button) => button.addEventListener("click", () => {
     const start = parseLocalDate(state.dashboardWindowStartKey || localDateKey(startOfWeek()));
