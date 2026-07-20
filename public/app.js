@@ -1984,55 +1984,56 @@ function renderPrintableIngredientList(version) {
   content.querySelector("#backToRecipeCard").addEventListener("click", () => renderVersionCard(version.id));
 }
 
-async function renderIngredients() {
+async function renderIngredients(editIngredientId = null) {
   state.view = "ingredients";
-  setPage("Ingredients", "Add to and review the master ingredient list used by all recipe dropdowns.");
+  setPage("Ingredients", "Add, edit, and remove ingredients from the master list used by all recipe dropdowns.");
   await loadIngredientsMaster(true);
   const ingredients = state.ingredientsMaster;
+  const editing = editIngredientId ? ingredients.find((item) => item.id === Number(editIngredientId)) : null;
   content.innerHTML = `
     <section class="section">
       <div class="section-header">
         <div>
-          <h2>Add Master Ingredient</h2>
-          <p class="helper">New ingredients are saved to the master list and become available in recipe dropdowns immediately.</p>
+          <h2>${editing ? "Edit Master Ingredient" : "Add Master Ingredient"}</h2>
+          <p class="helper">${editing ? `Editing ${escapeHtml(editing.ingredient_name)}. Existing published recipe snapshots will not be changed.` : "New ingredients are saved to the master list and become available in recipe dropdowns immediately."}</p>
         </div>
       </div>
       <form id="ingredientForm">
         <div class="grid">
           <label>Name
-            <input name="ingredient_name" required placeholder="Ingredient name">
+            <input name="ingredient_name" required placeholder="Ingredient name" value="${escapeHtml(editing?.ingredient_name || "")}">
           </label>
           <label>Type
-            <select name="ingredient_type">${typeOptions("")}</select>
+            <select name="ingredient_type">${typeOptions(editing?.ingredient_type || "")}</select>
           </label>
           <label>Description
-            <input name="description" placeholder="Description, INCI, or supplier notes">
+            <input name="description" placeholder="Description, INCI, or supplier notes" value="${escapeHtml(editing?.description || "")}">
           </label>
           <label>Recipe unit
-            <input name="default_unit" value="grams">
+            <input name="default_unit" value="${escapeHtml(editing?.default_unit || "grams")}">
           </label>
           <label>Inventory unit of measure
-            <input name="unit_of_measure" placeholder="10kg Box, Gram, Gallon">
+            <input name="unit_of_measure" placeholder="10kg Box, Gram, Gallon" value="${escapeHtml(editing?.unit_of_measure || "")}">
           </label>
           <label>Grams conversion
-            <input name="grams_conversion" type="number" step="any" min="0" value="1">
+            <input name="grams_conversion" type="number" step="any" min="0" value="${editing?.grams_conversion || editing?.default_grams_conversion || 1}">
           </label>
           <label>Default vendor
-            <input name="default_vendor" placeholder="Vendor">
+            <input name="default_vendor" placeholder="Vendor" value="${escapeHtml(editing?.default_vendor || "")}">
           </label>
           <label>Default cost
-            <input name="default_cost" type="number" step="any" min="0" value="0">
+            <input name="default_cost" type="number" step="any" min="0" value="${editing?.default_cost || 0}">
           </label>
           <label>Source
-            <input name="source" value="Manual Entry">
+            <input name="source" value="${escapeHtml(editing?.source || "Manual Entry")}">
           </label>
         </div>
         <label class="full-field">Notes
-          <textarea name="notes" placeholder="Internal notes"></textarea>
+          <textarea name="notes" placeholder="Internal notes">${escapeHtml(editing?.notes || "")}</textarea>
         </label>
         <div class="toolbar">
-          <button class="primary" type="submit">Save Ingredient</button>
-          <button type="reset">Clear</button>
+          <button class="primary" type="submit">${editing ? "Save Changes" : "Save Ingredient"}</button>
+          ${editing ? '<button id="cancelIngredientEdit" type="button">Cancel Edit</button>' : '<button type="reset">Clear</button>'}
         </div>
       </form>
     </section>
@@ -2043,8 +2044,8 @@ async function renderIngredients() {
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Description</th><th>Inventory unit of measure</th><th>Grams conversion</th><th>Recipe unit</th><th>Default vendor</th><th>Default cost</th><th>Source</th><th>Notes</th></tr></thead>
-          <tbody>${ingredients.map((item) => `<tr><td>${escapeHtml(item.ingredient_name)}</td><td>${escapeHtml(item.ingredient_type || "")}</td><td>${escapeHtml(item.description || "")}</td><td>${escapeHtml(item.unit_of_measure || "")}</td><td>${qty(item.grams_conversion || item.default_grams_conversion || 1)}</td><td>${escapeHtml(item.default_unit || "grams")}</td><td>${escapeHtml(item.default_vendor || "")}</td><td>${qty(item.default_cost || 0)}</td><td>${escapeHtml(item.source || "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`).join("")}</tbody>
+          <thead><tr><th>Name</th><th>Type</th><th>Description</th><th>Inventory unit of measure</th><th>Grams conversion</th><th>Recipe unit</th><th>Default vendor</th><th>Default cost</th><th>Source</th><th>Notes</th><th>Actions</th></tr></thead>
+          <tbody>${ingredients.map((item) => `<tr><td>${escapeHtml(item.ingredient_name)}</td><td>${escapeHtml(item.ingredient_type || "")}</td><td>${escapeHtml(item.description || "")}</td><td>${escapeHtml(item.unit_of_measure || "")}</td><td>${qty(item.grams_conversion || item.default_grams_conversion || 1)}</td><td>${escapeHtml(item.default_unit || "grams")}</td><td>${escapeHtml(item.default_vendor || "")}</td><td>${qty(item.default_cost || 0)}</td><td>${escapeHtml(item.source || "")}</td><td>${escapeHtml(item.notes || "")}</td><td><div class="toolbar"><button type="button" data-edit-ingredient="${item.id}">Edit</button><button type="button" class="danger" data-delete-ingredient="${item.id}" data-ingredient-name="${escapeHtml(item.ingredient_name)}">Delete</button></div></td></tr>`).join("")}</tbody>
         </table>
       </div>
     </section>
@@ -2056,12 +2057,29 @@ async function renderIngredients() {
     payload.grams_conversion = Number(payload.grams_conversion || 1);
     payload.default_grams_conversion = payload.grams_conversion;
     payload.default_cost = Number(payload.default_cost || 0);
-    const saved = await api("/api/ingredients", { method: "POST", body: payload });
+    const saved = await api(editing ? `/api/ingredients/${editing.id}` : "/api/ingredients", { method: editing ? "PUT" : "POST", body: payload });
     state.ingredientsMaster = [];
     await loadIngredientsMaster(true);
-    showToast(`${saved.ingredient_name} added to master ingredients.`);
+    showToast(`${saved.ingredient_name} ${editing ? "updated" : "added to master ingredients"}.`);
     await renderIngredients();
   });
+  content.querySelector("#cancelIngredientEdit")?.addEventListener("click", () => renderIngredients());
+  content.querySelectorAll("[data-edit-ingredient]").forEach((button) => button.addEventListener("click", async () => {
+    await renderIngredients(button.dataset.editIngredient);
+    content.querySelector("#ingredientForm")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  content.querySelectorAll("[data-delete-ingredient]").forEach((button) => button.addEventListener("click", async () => {
+    const name = button.dataset.ingredientName;
+    if (!window.confirm(`Delete ${name} from the master ingredient list? Existing recipes that use it will not be changed.`)) return;
+    try {
+      await api(`/api/ingredients/${button.dataset.deleteIngredient}`, { method: "DELETE" });
+      state.ingredientsMaster = [];
+      showToast(`${name} deleted from master ingredients.`);
+      await renderIngredients();
+    } catch (error) {
+      showToast(error.message);
+    }
+  }));
 }
 
 async function renderProductionItems() {

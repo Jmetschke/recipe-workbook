@@ -118,6 +118,10 @@ async function migrate() {
       source TEXT DEFAULT '',
       notes TEXT DEFAULT ''
     )`,
+    `CREATE TABLE IF NOT EXISTS ingredients_master_deleted (
+      normalized_name TEXT PRIMARY KEY,
+      deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
     `CREATE TABLE IF NOT EXISTS production_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       item_name TEXT NOT NULL UNIQUE,
@@ -538,6 +542,11 @@ async function markImportJobCreated(importJobId, recipeId) {
 
 async function upsertMasterIngredients(ingredients = []) {
   for (const item of ingredients.filter((ingredient) => ingredient.ingredient_name)) {
+    const deleted = await get(
+      "SELECT normalized_name FROM ingredients_master_deleted WHERE normalized_name = LOWER(?)",
+      [String(item.ingredient_name).trim()]
+    );
+    if (deleted) continue;
     const gramsConversion = item.grams_conversion || item.gram_conversion || item.default_grams_conversion || 1;
     await execute(
       `INSERT INTO ingredients_master (
@@ -602,6 +611,62 @@ async function listIngredients() {
 
 async function getIngredient(name) {
   return get("SELECT * FROM ingredients_master WHERE ingredient_name = ?", [name]);
+}
+
+async function getIngredientById(id) {
+  return get("SELECT * FROM ingredients_master WHERE id = ?", [id]);
+}
+
+async function updateMasterIngredient(id, item) {
+  const existing = await getIngredientById(id);
+  if (!existing) return null;
+  const ingredientName = String(item.ingredient_name || "").trim();
+  const duplicate = await get(
+    "SELECT id FROM ingredients_master WHERE LOWER(ingredient_name) = LOWER(?) AND id <> ?",
+    [ingredientName, id]
+  );
+  if (duplicate) {
+    const error = new Error("An ingredient with that name already exists.");
+    error.statusCode = 409;
+    throw error;
+  }
+  const gramsConversion = Number(item.grams_conversion ?? item.default_grams_conversion ?? 1);
+  await execute(
+    `UPDATE ingredients_master SET
+      ingredient_name = ?, ingredient_type = ?, description = ?, default_unit = ?, default_vendor = ?, default_cost = ?,
+      unit_of_measure = ?, grams_conversion = ?, default_grams_conversion = ?, source = ?, notes = ?
+    WHERE id = ?`,
+    [
+      ingredientName,
+      item.ingredient_type || "",
+      item.description || "",
+      item.default_unit || "grams",
+      item.default_vendor || "",
+      Number(item.default_cost || 0),
+      item.unit_of_measure || "",
+      gramsConversion > 0 ? gramsConversion : 1,
+      gramsConversion > 0 ? gramsConversion : 1,
+      item.source || "Manual Entry",
+      item.notes || "",
+      id
+    ]
+  );
+  return getIngredientById(id);
+}
+
+async function deleteMasterIngredient(id) {
+  const existing = await getIngredientById(id);
+  if (!existing) return null;
+  await execute(
+    "INSERT OR REPLACE INTO ingredients_master_deleted (normalized_name, deleted_at) VALUES (LOWER(?), CURRENT_TIMESTAMP)",
+    [existing.ingredient_name]
+  );
+  await execute("DELETE FROM ingredients_master WHERE id = ?", [id]);
+  return existing;
+}
+
+async function restoreMasterIngredientName(name) {
+  await execute("DELETE FROM ingredients_master_deleted WHERE normalized_name = LOWER(?)", [String(name || "").trim()]);
 }
 
 async function upsertProductionItems(items = []) {
@@ -796,6 +861,10 @@ module.exports = {
   upsertMasterIngredients,
   listIngredients,
   getIngredient,
+  getIngredientById,
+  updateMasterIngredient,
+  deleteMasterIngredient,
+  restoreMasterIngredientName,
   upsertProductionItems,
   listProductionItems,
   getProductionItem,

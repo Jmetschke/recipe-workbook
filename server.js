@@ -24,6 +24,9 @@ const {
   upsertMasterIngredients,
   listIngredients,
   getIngredient,
+  updateMasterIngredient,
+  deleteMasterIngredient,
+  restoreMasterIngredientName,
   upsertProductionItems,
   listProductionItems,
   getProductionItem,
@@ -227,6 +230,7 @@ app.post("/api/ingredients", asyncRoute(async (req, res) => {
   if (!req.body.ingredient_name || !String(req.body.ingredient_name).trim()) {
     return res.status(400).json({ error: "Ingredient name is required." });
   }
+  await restoreMasterIngredientName(req.body.ingredient_name);
   await upsertMasterIngredients([{
     ingredient_name: String(req.body.ingredient_name).trim(),
     ingredient_type: req.body.ingredient_type,
@@ -241,6 +245,21 @@ app.post("/api/ingredients", asyncRoute(async (req, res) => {
     notes: req.body.notes
   }]);
   return res.status(201).json(await getIngredient(String(req.body.ingredient_name).trim()));
+}));
+
+app.put("/api/ingredients/:id", asyncRoute(async (req, res) => {
+  if (!req.body.ingredient_name || !String(req.body.ingredient_name).trim()) {
+    return res.status(400).json({ error: "Ingredient name is required." });
+  }
+  const ingredient = await updateMasterIngredient(req.params.id, req.body);
+  if (!ingredient) return res.status(404).json({ error: "Ingredient not found" });
+  return res.json(ingredient);
+}));
+
+app.delete("/api/ingredients/:id", asyncRoute(async (req, res) => {
+  const ingredient = await deleteMasterIngredient(req.params.id);
+  if (!ingredient) return res.status(404).json({ error: "Ingredient not found" });
+  return res.json(ingredient);
 }));
 
 app.get("/api/production-items", asyncRoute(async (req, res) => {
