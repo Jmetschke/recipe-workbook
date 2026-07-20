@@ -2,6 +2,7 @@
   "name": "Recipe Manufacturing Manager",
   "short_name": "Recipes",
   "description": "Internal recipe management app for importing, editing, publishing, and printing production recipe cards.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

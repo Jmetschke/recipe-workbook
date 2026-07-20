@@ -42,6 +42,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: "15mb" }));
+// Serve the PWA shell, manifest, service worker, and icons from the existing public frontend folder.
 app.use(express.static(path.join(__dirname, "public")));
 
 function asyncRoute(handler) {

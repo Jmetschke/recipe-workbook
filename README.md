@@ -92,3 +92,36 @@ For local SQLite override:
 ```bash
 DATABASE_PATH=/path/to/recipes.db npm start
 ```
+
+## Progressive Web App
+
+The Express static frontend lives in `public/` and is installable as an internal PWA when served over HTTPS (as it is on Render). Its PWA pieces are:
+
+- `public/manifest.json`: app identity, standalone display settings, colors, and install icons.
+- `public/icons/icon-192.png` and `public/icons/icon-512.png`: Android and iOS Home Screen artwork.
+- `public/service-worker.js`: a deliberately small online-first app-shell worker.
+- `public/index.html`: manifest, theme, mobile-web-app, and Apple Home Screen metadata.
+- `public/app.js`: service-worker registration after page load.
+
+The service worker never intercepts `/api/` requests or cross-origin requests. Recipe data therefore continues to come directly from the live Express/Render routes backed by Turso and is not stored in the browser cache. Only same-origin frontend assets have an offline fallback.
+
+### Test installation
+
+Use the deployed Render HTTPS URL for device testing. Localhost can verify registration on a development computer, but a phone must use a secure reachable URL.
+
+On iPhone or iPad Safari:
+
+1. Open the Render URL in Safari and let the page load.
+2. Tap **Share**.
+3. Tap **Add to Home Screen**, confirm the name, and tap **Add**.
+4. Launch the new Home Screen icon. Confirm it opens without Safari browser chrome.
+5. Open a recipe and save a harmless test change to confirm live API/Turso access still works.
+
+On Android Chrome:
+
+1. Open the Render URL in Chrome and let the page load.
+2. Open the Chrome menu and choose **Install app** or **Add to Home screen**.
+3. Confirm installation, then launch the icon from the Home Screen or app drawer.
+4. Confirm the app opens in standalone mode and a normal API-backed view loads and saves.
+
+After deploying a service-worker change, existing installations may need one normal online reload before the newly activated worker and app-shell cache take control.
