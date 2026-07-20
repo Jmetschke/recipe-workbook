@@ -398,6 +398,26 @@ async function updateRecipe(id, input) {
   return getRecipe(id);
 }
 
+async function rescheduleRecipe(id, expectedProductionDate) {
+  const recipe = await getRecipe(id);
+  if (!recipe) return null;
+  if (recipe.status !== "Published") {
+    const error = new Error("Only published recipes can be rescheduled from the calendar.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expectedProductionDate || "")) {
+    const error = new Error("A valid production date is required.");
+    error.statusCode = 400;
+    throw error;
+  }
+  await execute(
+    "UPDATE recipes SET expected_production_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [expectedProductionDate, id]
+  );
+  return getRecipe(id);
+}
+
 async function nextVersion(recipeId) {
   const latest = await get("SELECT version_number FROM recipe_versions WHERE recipe_id = ? ORDER BY id DESC LIMIT 1", [recipeId]);
   if (!latest) return "v1.0";
@@ -763,6 +783,7 @@ module.exports = {
   listRecipes,
   createRecipe,
   updateRecipe,
+  rescheduleRecipe,
   publishRecipe,
   unpublishRecipe,
   duplicateRecipe,

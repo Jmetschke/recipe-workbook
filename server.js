@@ -11,6 +11,7 @@ const {
   listRecipes,
   createRecipe,
   updateRecipe,
+  rescheduleRecipe,
   publishRecipe,
   unpublishRecipe,
   duplicateRecipe,
@@ -116,6 +117,12 @@ app.get("/api/recipes/:id", asyncRoute(async (req, res) => {
 
 app.put("/api/recipes/:id", asyncRoute(async (req, res) => {
   const recipe = await updateRecipe(req.params.id, req.body);
+  if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+  return res.json(recipe);
+}));
+
+app.patch("/api/recipes/:id/production-date", asyncRoute(async (req, res) => {
+  const recipe = await rescheduleRecipe(req.params.id, req.body.expected_production_date);
   if (!recipe) return res.status(404).json({ error: "Recipe not found" });
   return res.json(recipe);
 }));

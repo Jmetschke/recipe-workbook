@@ -624,7 +624,7 @@ function renderDashboardMiniCalendar(recipes = []) {
     cells.push(`
       <div class="mini-calendar-cell ${selected ? "selected" : ""}" data-dashboard-calendar-day="${date}" role="button" tabindex="0" aria-label="Show all recipes for ${shortDateLabel(date)}" aria-pressed="${selected}">
         <div class="calendar-day">${shortDateLabel(date)}</div>
-        ${dayRecipes.slice(0, 2).map((recipe) => `<button class="mini-calendar-recipe" data-mini-card-recipe="${recipe.id}">${escapeHtml(recipe.name)}</button>`).join("")}
+        ${dayRecipes.slice(0, 2).map((recipe) => `<button class="mini-calendar-recipe" data-mini-card-recipe="${recipe.id}" draggable="true" title="Open ${escapeHtml(recipe.name)} or drag to reschedule">${escapeHtml(recipe.name)}</button>`).join("")}
         ${dayRecipes.length > 2 ? `<button class="calendar-more" data-dashboard-calendar-more="${date}">+${dayRecipes.length - 2} more</button>` : ""}
       </div>
     `);
@@ -639,7 +639,7 @@ function renderDashboardMiniCalendar(recipes = []) {
         </div>
         ${selectedRecipes.length
           ? `<div class="dashboard-day-recipes">${selectedRecipes.map((recipe) => `
-              <button class="calendar-recipe" data-mini-card-recipe="${recipe.id}">
+              <button class="calendar-recipe" data-mini-card-recipe="${recipe.id}" draggable="true" title="Open ${escapeHtml(recipe.name)} or drag to reschedule">
                 <strong>${escapeHtml(recipe.name)}</strong>
                 <span>${escapeHtml(recipe.current_version || "")}</span>
               </button>
@@ -653,7 +653,7 @@ function renderDashboardMiniCalendar(recipes = []) {
       <div class="section-header">
         <div>
           <h2>Published Production Calendar</h2>
-          <p class="helper">Four-week production window: ${shortDateLabel(windowStartKey)} to ${shortDateLabel(windowEndKey)}</p>
+          <p class="helper">Four-week production window: ${shortDateLabel(windowStartKey)} to ${shortDateLabel(windowEndKey)}. Drag a recipe to a new day to reschedule it.</p>
         </div>
         <div class="toolbar mini-calendar-controls">
           <button data-dashboard-calendar-shift="-14">Back 2 Weeks</button>
@@ -705,6 +705,65 @@ function bindMiniCalendarButtons() {
   content.querySelector("[data-dashboard-calendar-current]")?.addEventListener("click", () => {
     state.dashboardWindowStartKey = localDateKey(startOfWeek());
     refreshDashboardMiniCalendar();
+  });
+  bindCalendarDragAndDrop({
+    cardSelector: "[data-mini-card-recipe]",
+    cellSelector: "[data-dashboard-calendar-day]",
+    recipeIdAttribute: "miniCardRecipe",
+    dateAttribute: "dashboardCalendarDay",
+    afterMove: refreshDashboardMiniCalendar
+  });
+}
+
+async function reschedulePublishedRecipe(recipeId, date) {
+  const updated = await api(`/api/recipes/${recipeId}/production-date`, {
+    method: "PATCH",
+    body: { expected_production_date: date }
+  });
+  state.recipes = state.recipes.map((recipe) => recipe.id === updated.id ? updated : recipe);
+  showToast(`${updated.name} rescheduled to ${shortDateLabel(date)}.`);
+  return updated;
+}
+
+function bindCalendarDragAndDrop({ cardSelector, cellSelector, recipeIdAttribute, dateAttribute, afterMove }) {
+  let draggedCard = null;
+  content.querySelectorAll(cardSelector).forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      draggedCard = card;
+      card.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset[recipeIdAttribute]);
+    });
+    card.addEventListener("dragend", () => {
+      draggedCard = null;
+      card.classList.remove("dragging");
+      content.querySelectorAll(`${cellSelector}.drag-over`).forEach((cell) => cell.classList.remove("drag-over"));
+    });
+  });
+  content.querySelectorAll(cellSelector).forEach((cell) => {
+    cell.addEventListener("dragover", (event) => {
+      if (!draggedCard) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      cell.classList.add("drag-over");
+    });
+    cell.addEventListener("dragleave", (event) => {
+      if (!cell.contains(event.relatedTarget)) cell.classList.remove("drag-over");
+    });
+    cell.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      cell.classList.remove("drag-over");
+      const recipeId = Number(event.dataTransfer.getData("text/plain"));
+      const date = cell.dataset[dateAttribute];
+      const recipe = state.recipes.find((item) => item.id === recipeId);
+      if (!recipe || !date || recipe.expected_production_date === date) return;
+      try {
+        await reschedulePublishedRecipe(recipeId, date);
+        afterMove(date);
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
   });
 }
 
@@ -1779,12 +1838,12 @@ function renderPublishedCalendar(activeMonth) {
     const date = `${activeMonth}-${String(day).padStart(2, "0")}`;
     const recipes = recipesByDate.get(date) || [];
     cells.push(`
-      <div class="calendar-cell">
+      <div class="calendar-cell" data-calendar-date="${date}">
         <div class="calendar-day">${day}</div>
         ${recipes.map((recipe) => `
-          <button class="calendar-recipe" data-card-recipe="${recipe.id}">
-            <strong>${recipe.name}</strong>
-            <span>${recipe.current_version || ""}</span>
+          <button class="calendar-recipe" data-card-recipe="${recipe.id}" draggable="true" title="Open ${escapeHtml(recipe.name)} or drag to reschedule">
+            <strong>${escapeHtml(recipe.name)}</strong>
+            <span>${escapeHtml(recipe.current_version || "")}</span>
           </button>
         `).join("")}
       </div>
@@ -1794,7 +1853,7 @@ function renderPublishedCalendar(activeMonth) {
     <section class="section">
       <div class="section-header">
         <button id="prevMonth">‹ ${monthLabel(prevMonth)}</button>
-        <h2>${monthLabel(activeMonth)}</h2>
+        <div class="calendar-heading"><h2>${monthLabel(activeMonth)}</h2><p class="helper">Drag a recipe to another day to reschedule it.</p></div>
         <button id="nextMonth">${monthLabel(nextMonth)} ›</button>
       </div>
       <div class="calendar-weekdays">
@@ -1807,6 +1866,13 @@ function renderPublishedCalendar(activeMonth) {
   content.querySelector("#nextMonth").addEventListener("click", () => renderPublishedCalendar(nextMonth));
   content.querySelectorAll("[data-card-recipe]").forEach((button) => {
     button.addEventListener("click", () => renderCards(button.dataset.cardRecipe));
+  });
+  bindCalendarDragAndDrop({
+    cardSelector: "[data-card-recipe]",
+    cellSelector: "[data-calendar-date]",
+    recipeIdAttribute: "cardRecipe",
+    dateAttribute: "calendarDate",
+    afterMove: (date) => renderPublishedCalendar(monthKey(date))
   });
 }
 
