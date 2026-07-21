@@ -55,6 +55,13 @@
           <p id="pageSubtitle">Recipes, drafts, published cards, and import tools.</p>
         </div>
         <div class="top-actions">
+          <!-- PWA install help remains visible in browsers and changes to Downloaded in standalone mode. -->
+          <button id="pwaInstallHelp" class="install-button" type="button" aria-haspopup="dialog">
+            <svg class="install-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4" />
+            </svg>
+            <span id="pwaInstallLabel">Download</span>
+          </button>
           <button id="newRecipeBtn" class="primary">New Recipe</button>
           <button id="importShortcutBtn">Import Spreadsheet</button>
         </div>
@@ -62,6 +69,24 @@
       <section id="toast" class="toast hidden"></section>
       <section id="content"></section>
     </main>
+
+    <!-- Installation guidance is platform-aware; live recipe data is never placed in this dialog or cached. -->
+    <div id="pwaInstallDialog" class="install-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="pwaInstallTitle">
+      <div class="install-dialog-card">
+        <div class="section-header">
+          <div>
+            <h2 id="pwaInstallTitle">Download Recipe Manager</h2>
+            <p id="pwaInstallStatus" class="helper"></p>
+          </div>
+          <button id="closePwaInstallDialog" type="button" aria-label="Close download instructions">×</button>
+        </div>
+        <div id="pwaInstallInstructions"></div>
+        <div class="toolbar">
+          <button id="runPwaInstall" class="primary hidden" type="button">Install App</button>
+          <button id="donePwaInstall" type="button">Done</button>
+        </div>
+      </div>
+    </div>
 
     <template id="recipeRowTemplate">
       <tr>

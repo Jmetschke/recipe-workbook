@@ -2203,6 +2203,99 @@ document.querySelectorAll(".nav").forEach((button) => button.addEventListener("c
 
 document.querySelector("#newRecipeBtn").addEventListener("click", () => renderNewRecipeChoice());
 document.querySelector("#importShortcutBtn").addEventListener("click", () => renderImport());
+
+// PWA install UI: browsers expose the native prompt differently, so the dialog always provides usable instructions.
+let deferredInstallPrompt = null;
+const pwaInstallButton = document.querySelector("#pwaInstallHelp");
+const pwaInstallLabel = document.querySelector("#pwaInstallLabel");
+const pwaInstallDialog = document.querySelector("#pwaInstallDialog");
+const pwaInstallStatus = document.querySelector("#pwaInstallStatus");
+const pwaInstallInstructions = document.querySelector("#pwaInstallInstructions");
+const runPwaInstallButton = document.querySelector("#runPwaInstall");
+
+function isPwaInstalled() {
+  return window.matchMedia("(display-mode: standalone)").matches
+    || window.navigator.standalone === true
+    || window.localStorage.getItem("recipeManagerPwaInstalled") === "true";
+}
+
+function refreshPwaInstallState() {
+  const installed = isPwaInstalled();
+  pwaInstallLabel.textContent = installed ? "Downloaded" : "Download";
+  pwaInstallButton.classList.toggle("downloaded", installed);
+  pwaInstallButton.setAttribute("aria-label", installed ? "Recipe Manager is downloaded" : "Download Recipe Manager");
+}
+
+function closePwaInstallDialog() {
+  pwaInstallDialog.classList.add("hidden");
+  pwaInstallButton.focus();
+}
+
+function openPwaInstallDialog() {
+  const installed = isPwaInstalled();
+  const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  pwaInstallStatus.textContent = installed
+    ? "Recipe Manager is already downloaded on this device."
+    : "Install this internal app directly from your browser—no app store is required.";
+  runPwaInstallButton.classList.toggle("hidden", installed || !deferredInstallPrompt);
+  if (installed) {
+    pwaInstallInstructions.innerHTML = "<p>Open Recipe Manager from its Home Screen or app-drawer icon for the standalone app experience.</p>";
+  } else if (isIos) {
+    pwaInstallInstructions.innerHTML = `
+      <ol>
+        <li>Open this page in <strong>Safari</strong>.</li>
+        <li>Tap the <strong>Share</strong> button.</li>
+        <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+        <li>Tap <strong>Add</strong>, then launch Recipe Manager from the new icon.</li>
+      </ol>`;
+  } else if (deferredInstallPrompt) {
+    pwaInstallInstructions.innerHTML = "<p>Select <strong>Install App</strong> below and approve the browser installation prompt.</p>";
+  } else {
+    pwaInstallInstructions.innerHTML = `
+      <ol>
+        <li>Open your browser menu.</li>
+        <li>Select <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+        <li>Confirm, then launch Recipe Manager from its new icon.</li>
+      </ol>`;
+  }
+  pwaInstallDialog.classList.remove("hidden");
+  document.querySelector("#closePwaInstallDialog").focus();
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+});
+
+window.addEventListener("appinstalled", () => {
+  window.localStorage.setItem("recipeManagerPwaInstalled", "true");
+  deferredInstallPrompt = null;
+  refreshPwaInstallState();
+  if (!pwaInstallDialog.classList.contains("hidden")) openPwaInstallDialog();
+});
+
+pwaInstallButton.addEventListener("click", openPwaInstallDialog);
+document.querySelector("#closePwaInstallDialog").addEventListener("click", closePwaInstallDialog);
+document.querySelector("#donePwaInstall").addEventListener("click", closePwaInstallDialog);
+pwaInstallDialog.addEventListener("click", (event) => {
+  if (event.target === pwaInstallDialog) closePwaInstallDialog();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !pwaInstallDialog.classList.contains("hidden")) closePwaInstallDialog();
+});
+runPwaInstallButton.addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const choice = await deferredInstallPrompt.userChoice;
+  if (choice.outcome === "accepted") {
+    window.localStorage.setItem("recipeManagerPwaInstalled", "true");
+  }
+  deferredInstallPrompt = null;
+  refreshPwaInstallState();
+  openPwaInstallDialog();
+});
+
+refreshPwaInstallState();
 document.querySelectorAll(".location-nav__toggle-button").forEach((button) => {
   button.addEventListener("click", () => {
     const selectedLocation = button.dataset.location;
