@@ -108,6 +108,10 @@ function isVapeRecipe(recipe = state.currentRecipe) {
   return recipe?.recipe_card_type === "Vape";
 }
 
+function isDistillateResinBlendRecipe(recipe = state.currentRecipe) {
+  return recipe?.recipe_card_type === "Distillate/Resin Blend";
+}
+
 function vapeDistillateGrams(recipe = state.currentRecipe) {
   return numeric(recipe?.batch_size) * 1000;
 }
@@ -260,6 +264,12 @@ function calculateClientRecipe(recipe) {
   const ingredients = recipe.ingredients || [];
   const batchSizeInput = numeric(recipe.batch_size);
   const unitWeight = numeric(recipe.unit_weight);
+  const blendStartingDistillatePercent = isDistillateResinBlendRecipe(recipe) ? normalizePercentInput(recipe.potency_percent) : 0;
+  const blendGoalDistillatePercent = isDistillateResinBlendRecipe(recipe) ? normalizePercentInput(recipe.target_mg_per_unit) : 0;
+  const blendResinNeeded = blendStartingDistillatePercent > 0 && blendGoalDistillatePercent > 0 && blendGoalDistillatePercent < blendStartingDistillatePercent
+    ? (batchSizeInput * blendStartingDistillatePercent / blendGoalDistillatePercent) - batchSizeInput
+    : 0;
+  const blendFinalBatchGrams = batchSizeInput + blendResinNeeded;
   const batchSizeMode = isVapeRecipe(recipe) ? "liters" : recipe.batch_size_mode === "units" ? "units" : "grams";
   const distillateGrams = isVapeRecipe(recipe) ? vapeDistillateGrams(recipe) : 0;
   const terpenePercent = isVapeRecipe(recipe) ? vapeTerpenePercent(recipe) : 0;
@@ -267,7 +277,11 @@ function calculateClientRecipe(recipe) {
     ? (distillateGrams * terpenePercent) / (1 - terpenePercent)
     : 0;
   const vapeFinalBatchGrams = distillateGrams + terpeneTotalGrams;
-  const totalBatchGrams = isVapeRecipe(recipe) ? vapeFinalBatchGrams : batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
+  const totalBatchGrams = isVapeRecipe(recipe)
+    ? vapeFinalBatchGrams
+    : isDistillateResinBlendRecipe(recipe)
+      ? blendFinalBatchGrams
+      : batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
   const formulaTotal = ingredients.reduce((sum, item) => sum + numeric(item.formula_qty), 0);
   const estimatedYield = isVapeRecipe(recipe) ? totalBatchGrams / vapeUnitSize(recipe) : batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
   const vapeTerpenes = isVapeRecipe(recipe) ? normalizeVapeTerpenes(recipe, terpeneTotalGrams, vapeFinalBatchGrams) : [];
@@ -294,6 +308,16 @@ function calculateClientRecipe(recipe) {
         unit: "grams"
       };
     }
+    if (isDistillateResinBlendRecipe(recipe)) {
+      const batchQty = index === 0 ? batchSizeInput : index === 1 ? blendResinNeeded : numeric(item.batch_qty);
+      return {
+        ...item,
+        formula_qty: batchQty,
+        formula_percent: totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0,
+        batch_qty: batchQty,
+        unit: "grams"
+      };
+    }
     const hasPercent = item.formula_percent !== undefined && item.formula_percent !== null && item.formula_percent !== "";
     const formulaPercent = hasPercent
       ? normalizePercentInput(item.formula_percent)
@@ -312,7 +336,11 @@ function calculateClientRecipe(recipe) {
   const percentTotal = normalizedIngredients.reduce((sum, item) => sum + numeric(item.formula_percent), 0);
   const batchTotal = normalizedIngredients.reduce((sum, item) => sum + numeric(item.batch_qty), 0);
   const normalizedFormulaTotal = normalizedIngredients.reduce((sum, item) => sum + numeric(item.formula_qty), 0);
-  const activeAdditives = isVapeRecipe(recipe) ? vapeTerpenes : normalizeActiveAdditivesForCalculation(recipe, normalizedIngredients, estimatedYield);
+  const activeAdditives = isVapeRecipe(recipe)
+    ? vapeTerpenes
+    : isDistillateResinBlendRecipe(recipe)
+      ? []
+      : normalizeActiveAdditivesForCalculation(recipe, normalizedIngredients, estimatedYield);
   const activeMassPerUnitMg = activeAdditives.reduce((sum, row) => sum + numeric(row.physical_mg_per_unit), 0);
   const activeMassPerUnitGrams = activeAdditives.reduce((sum, row) => sum + numeric(row.physical_grams_per_unit), 0);
   const activeIngredientGrams = activeAdditives.reduce((sum, row) => sum + numeric(row.calculated_grams), 0);
@@ -328,7 +356,7 @@ function calculateClientRecipe(recipe) {
     warnings.push(`Formula percentages total ${(percentTotal * 100).toFixed(2)}%, not 100%.`);
   }
 
-  if (!isVapeRecipe(recipe)) {
+  if (!isVapeRecipe(recipe) && !isDistillateResinBlendRecipe(recipe)) {
     normalizedIngredients.forEach((item) => {
       const name = `${item.ingredient_name || ""}`.toLowerCase();
       if ((name.includes("additive") || name.includes("concentrate") || name.includes("active")) && item.formula_percent * 100 > 4) {
@@ -355,6 +383,11 @@ function calculateClientRecipe(recipe) {
     terpene_percent: terpenePercent,
     terpene_total_grams: terpeneTotalGrams,
     final_batch_grams: isVapeRecipe(recipe) ? vapeFinalBatchGrams : totalBatchGrams,
+    blend_starting_grams: isDistillateResinBlendRecipe(recipe) ? batchSizeInput : 0,
+    blend_starting_distillate_percent: blendStartingDistillatePercent,
+    blend_starting_resin_percent: isDistillateResinBlendRecipe(recipe) ? Math.max(1 - blendStartingDistillatePercent, 0) : 0,
+    blend_goal_distillate_percent: blendGoalDistillatePercent,
+    blend_resin_needed_grams: blendResinNeeded,
     active_ingredient_grams: activeIngredientGrams,
     total_active_additive_grams: activeIngredientGrams,
     active_mass_per_unit_mg: activeMassPerUnitMg,
@@ -822,10 +855,11 @@ function vapeDistillateIngredient(liters = 0) {
 
 function blankRecipe(recipeCardType = "Edible/Topical") {
   const vape = recipeCardType === "Vape";
+  const blend = recipeCardType === "Distillate/Resin Blend";
   return {
-    name: vape ? "Untitled Vape Recipe" : "Untitled Recipe",
-    recipe_card_type: vape ? "Vape" : "Edible/Topical",
-    product_type: vape ? "Vape" : "",
+    name: vape ? "Untitled Vape Recipe" : blend ? "Untitled Distillate/Resin Blend" : "Untitled Recipe",
+    recipe_card_type: vape ? "Vape" : blend ? "Distillate/Resin Blend" : "Edible/Topical",
+    product_type: vape ? "Vape" : blend ? "Distillate/Resin Blend" : "",
     flavor: "",
     status: "Draft",
     current_version: "v1",
@@ -835,13 +869,16 @@ function blankRecipe(recipeCardType = "Edible/Topical") {
     unit_weight: 0,
     unit_weight_unit: vape ? "%" : "grams",
     vape_unit_size: vape ? 1 : 0,
-    target_mg_per_unit: 0,
-    potency_percent: 0,
+    target_mg_per_unit: blend ? 50 : 0,
+    potency_percent: blend ? 70 : 0,
     expected_production_date: "",
     copy_lock_formula: false,
     active_additives: [],
     notes: [],
-    ingredients: vape ? [vapeDistillateIngredient(0)] : [],
+    ingredients: vape ? [vapeDistillateIngredient(0)] : blend ? [
+      { ingredient_type: "SB", ingredient_name: "Starting Distillate/Resin Blend", unit: "grams", formula_qty: 0, formula_percent: 0, batch_qty: 0, notes: "Starting blend" },
+      { ingredient_type: "SB", ingredient_name: "Live Resin", unit: "grams", formula_qty: 0, formula_percent: 0, batch_qty: 0, notes: "Calculated live resin addition" }
+    ] : [],
     steps: []
   };
 }
@@ -862,6 +899,11 @@ async function renderNewRecipeChoice() {
           <p>Use a distillate-first formula where concentrate is treated as a normal ingredient and additive percentages are recorded only.</p>
           <button class="primary" data-new-card-type="Vape">Create Vape Card</button>
         </article>
+        <article class="recipe-card">
+          <h3>distillate/resin Blend</h3>
+          <p>Start with an existing distillate/resin blend and calculate how much live resin is needed to reach a lower target distillate percentage.</p>
+          <button class="primary" data-new-card-type="Distillate/Resin Blend">Create Blend Card</button>
+        </article>
       </div>
     </section>
   `;
@@ -878,6 +920,7 @@ async function renderEditor(id, recipe = null, mode = null) {
     ? "published-view"
     : state.currentRecipe.status === "Template" ? "template-view" : "draft");
   syncVapeDistillateIngredient(state.currentRecipe);
+  syncDistillateResinBlendIngredients(state.currentRecipe);
   state.currentRecipe.calculations = state.currentRecipe.calculations || calculateClientRecipe(state.currentRecipe);
   const r = state.currentRecipe;
   const publishedView = state.editorMode === "published-view";
@@ -890,6 +933,7 @@ async function renderEditor(id, recipe = null, mode = null) {
   const editingPublishedRecord = publishedEdit || templateEdit;
   const formulaLocked = readOnlyRecipe || (Boolean(r.copy_lock_formula) && !editingPublishedRecord);
   const vapeRecipe = isVapeRecipe(r);
+  const blendRecipe = isDistillateResinBlendRecipe(r);
   const identityLocked = readOnlyRecipe;
   const headerLocked = readOnlyRecipe;
   setPage(r.name, readOnlyRecipe ? `${templateRecipe ? "Template" : "Published recipe"} is read-only. Select Edit to make changes.` : "Edit recipe fields and calculated batch quantities.");
@@ -906,18 +950,20 @@ async function renderEditor(id, recipe = null, mode = null) {
         </div>
       </div>
       <div class="grid">
-        ${field("recipe_card_type", "Recipe card type", vapeRecipe ? "Vape" : "Edible/Topical", "Fresh recipes choose this before editing. Duplicates keep the original card type.", "text", true)}
+        ${field("recipe_card_type", "Recipe card type", vapeRecipe ? "Vape" : blendRecipe ? "Distillate/Resin Blend" : "Edible/Topical", "Fresh recipes choose this before editing. Duplicates keep the original card type.", "text", true)}
         ${field("name", "Recipe name", r.name, "", "text", identityLocked)}
         ${field("product_type", "Product type", r.product_type, "", "text", identityLocked)}
         ${field("flavor", "Flavor", r.flavor, "", "text", identityLocked)}
         ${field("current_version", "Version to publish", r.current_version || suggestNextVersion(r.current_version), "Editable recommendation used when this recipe is published.", "text", identityLocked)}
         ${field("expected_production_date", "Expected production date", r.expected_production_date, "Required before publishing. Published cards appear on this calendar date.", "date", headerLocked)}
-        ${vapeRecipe ? ""
+        ${vapeRecipe || blendRecipe ? ""
           : selectField("batch_size_mode", "Batch size means", r.batch_size_mode || "grams", [["grams", "Total batch size in grams"], ["units", "Units to make"]], "Choose whether batch size is a total gram batch or a number of finished units.", headerLocked)}
-        ${field("batch_size", vapeRecipe ? "L of Distillate" : r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, vapeRecipe ? "This autofills the first ingredient as Concentrate - THC Distillate." : r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", readOnlyRecipe)}
-        ${field("unit_weight", vapeRecipe ? "% of terps in recipe" : "Weight per unit", r.unit_weight, vapeRecipe ? "Record the planned terpene percentage for this vape formula." : r.batch_size_mode === "units" ? "Required to convert units to total batch grams." : "Reference value only for estimating yield from total grams.", "number", readOnlyRecipe)}
+        ${field("batch_size", vapeRecipe ? "L of Distillate" : blendRecipe ? "Starting blend quantity (grams)" : r.batch_size_mode === "units" ? "Units to make" : "Total batch size", r.batch_size, vapeRecipe ? "This autofills the first ingredient as Concentrate - THC Distillate." : blendRecipe ? "Quantity of the existing distillate/resin blend." : r.batch_size_mode === "units" ? "The app multiplies this by weight per unit to calculate total grams." : "Total recipe batch size in grams.", "number", readOnlyRecipe)}
+        ${blendRecipe ? field("potency_percent", "Starting distillate %", r.potency_percent, "The attached calculator starts at 70%.", "number", readOnlyRecipe) : ""}
+        ${blendRecipe ? field("target_mg_per_unit", "Goal distillate %", r.target_mg_per_unit, "The attached calculator targets 50%.", "number", readOnlyRecipe) : ""}
+        ${blendRecipe ? "" : field("unit_weight", vapeRecipe ? "% of terps in recipe" : "Weight per unit", r.unit_weight, vapeRecipe ? "Record the planned terpene percentage for this vape formula." : r.batch_size_mode === "units" ? "Required to convert units to total batch grams." : "Reference value only for estimating yield from total grams.", "number", readOnlyRecipe)}
         ${vapeRecipe ? selectField("vape_unit_size", "Unit size", r.vape_unit_size || 1, [[1, "1g units"], [2, "2g units"]], "Used to calculate theoretical and real yield units from the final batch grams.", readOnlyRecipe) : ""}
-        ${vapeRecipe ? "" : field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", headerLocked)}
+        ${vapeRecipe || blendRecipe ? "" : field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", headerLocked)}
       </div>
       ${formulaLocked ? '<div class="warning">This recipe formula is locked. Formula quantity, formula percent, and batch quantity are not directly editable, but recalculations can still update them.</div>' : ""}
     </section>
@@ -974,6 +1020,21 @@ function selectField(name, label, value, options, help = "", locked = false) {
 function renderMetrics(recipe) {
   const c = recipe.calculations || {};
   const y = yieldDisplay(c);
+  if (isDistillateResinBlendRecipe(recipe)) {
+    return `
+      <section class="section" id="calcSummary">
+        <div class="grid">
+          <div class="metric"><strong>Starting blend</strong><p>${qty(c.blend_starting_grams)} grams</p></div>
+          <div class="metric"><strong>Starting composition</strong><p>${pct(c.blend_starting_distillate_percent)} distillate / ${pct(c.blend_starting_resin_percent)} live resin</p></div>
+          <div class="metric"><strong>Live resin needed</strong><p>${qty(c.blend_resin_needed_grams)} grams</p></div>
+          <div class="metric"><strong>Final blend</strong><p>${qty(c.final_batch_grams)} grams at ${pct(c.blend_goal_distillate_percent)} distillate</p></div>
+        </div>
+        ${numeric(c.blend_goal_distillate_percent) >= numeric(c.blend_starting_distillate_percent)
+          ? '<div class="warning">Goal distillate % must be lower than the starting distillate % to calculate a live resin addition.</div>'
+          : ""}
+      </section>
+    `;
+  }
   return `
     <section class="section" id="calcSummary">
       <div class="grid">
@@ -1013,6 +1074,27 @@ function syncVapeDistillateIngredient(recipe = state.currentRecipe) {
   first.formula_percent = numeric(recipe.batch_size) > 0 ? 1 : 0;
   first.batch_qty = vapeDistillateGrams(recipe);
   first.notes = first.notes || "Vape distillate base";
+}
+
+function syncDistillateResinBlendIngredients(recipe = state.currentRecipe) {
+  if (!isDistillateResinBlendRecipe(recipe)) return;
+  recipe.batch_size_mode = "grams";
+  recipe.batch_unit = "grams";
+  recipe.unit_weight_unit = "grams";
+  recipe.ingredients = recipe.ingredients || [];
+  while (recipe.ingredients.length < 2) recipe.ingredients.push({});
+  Object.assign(recipe.ingredients[0], {
+    ingredient_type: recipe.ingredients[0].ingredient_type || "SB",
+    ingredient_name: recipe.ingredients[0].ingredient_name || "Starting Distillate/Resin Blend",
+    unit: "grams",
+    notes: recipe.ingredients[0].notes || "Starting blend"
+  });
+  Object.assign(recipe.ingredients[1], {
+    ingredient_type: recipe.ingredients[1].ingredient_type || "SB",
+    ingredient_name: recipe.ingredients[1].ingredient_name || "Live Resin",
+    unit: "grams",
+    notes: recipe.ingredients[1].notes || "Calculated live resin addition"
+  });
 }
 
 function newAdditiveCalculation(name = "", ingredientIndex = "") {
@@ -1088,6 +1170,24 @@ function additiveUnitCountValue(row, calculated) {
 function renderActiveAdditiveTool(recipe, locked = false) {
   const c = recipe.calculations || {};
   const y = yieldDisplay(c);
+  if (isDistillateResinBlendRecipe(recipe)) {
+    return `
+      <section class="section" id="activeAdditiveTool">
+        <div class="section-header">
+          <div>
+            <h2>Distillate / Resin Blend Calculator</h2>
+            <p class="helper">Live resin needed = (starting blend × starting distillate % ÷ goal distillate %) − starting blend.</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="metric"><strong>Starting blend</strong><p>${qty(c.blend_starting_grams)} grams</p></div>
+          <div class="metric"><strong>Starting live resin</strong><p>${pct(c.blend_starting_resin_percent)}</p></div>
+          <div class="metric"><strong>Live resin to add</strong><p>${qty(c.blend_resin_needed_grams)} grams</p></div>
+          <div class="metric"><strong>Quantity after blending</strong><p>${qty(c.final_batch_grams)} grams</p></div>
+        </div>
+      </section>
+    `;
+  }
   const additives = ensureActiveAdditives(recipe);
   if (isVapeRecipe(recipe)) {
     return `
@@ -1210,9 +1310,10 @@ function renderActiveAdditiveTool(recipe, locked = false) {
 function refreshCalculationDisplay(updateRows = false) {
   if (!state.currentRecipe) return;
   syncVapeDistillateIngredient(state.currentRecipe);
+  syncDistillateResinBlendIngredients(state.currentRecipe);
   state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
   state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
-  if (!isVapeRecipe() && state.currentRecipe.active_additives?.length && applyAdditiveCalculationsToMatches()) {
+  if (!isVapeRecipe() && !isDistillateResinBlendRecipe() && state.currentRecipe.active_additives?.length && applyAdditiveCalculationsToMatches()) {
     state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
     state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
   }
@@ -1464,13 +1565,14 @@ function collectRecipe() {
     state.currentRecipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
   });
   syncVapeDistillateIngredient(state.currentRecipe);
+  syncDistillateResinBlendIngredients(state.currentRecipe);
   state.currentRecipe.batch_unit = isVapeRecipe() ? "L" : "grams";
   state.currentRecipe.notes = content.querySelector("#notesField").value.split("\n").map((line) => line.trim()).filter(Boolean);
   state.currentRecipe.ingredients = (state.currentRecipe.ingredients || []).map((item, index) => ({ ...item, sort_order: index + 1 }));
   state.currentRecipe.steps = (state.currentRecipe.steps || []).map((step, index) => ({ ...step, sort_order: index + 1 }));
   state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
   state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
-  if (!isVapeRecipe() && state.currentRecipe.active_additives.length) {
+  if (!isVapeRecipe() && !isDistillateResinBlendRecipe() && state.currentRecipe.active_additives.length) {
     applyAdditiveCalculationsToMatches();
     state.currentRecipe.calculations = calculateClientRecipe(state.currentRecipe);
     state.currentRecipe.active_additives = state.currentRecipe.calculations.active_additives || state.currentRecipe.active_additives || [];
@@ -1486,6 +1588,7 @@ function bindEditor() {
     const updateHeader = () => {
       state.currentRecipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
       syncVapeDistillateIngredient(state.currentRecipe);
+      syncDistillateResinBlendIngredients(state.currentRecipe);
       state.currentRecipe.batch_unit = isVapeRecipe() ? "L" : "grams";
       refreshCalculationDisplay(true);
     };
@@ -2103,6 +2206,7 @@ async function renderProductionItems() {
             <select name="recipe_card_type">
               <option>Edible/Topical</option>
               <option>Vape</option>
+              <option>Distillate/Resin Blend</option>
             </select>
           </label>
           <label>Product type

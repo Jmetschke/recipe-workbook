@@ -285,7 +285,7 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
 async function calculateWithActiveMatches(recipe, ingredients) {
   const settings = await allSettings();
   const firstPass = calculateRecipe(recipe, ingredients, settings);
-  if (recipe.recipe_card_type === "Vape") return firstPass;
+  if (recipe.recipe_card_type === "Vape" || recipe.recipe_card_type === "Distillate/Resin Blend") return firstPass;
   const nextIngredients = firstPass.ingredients.map((item) => ({ ...item }));
   const totalBatchGrams = Number(firstPass.total_batch_grams || 0);
   if (totalBatchGrams <= 0) return firstPass;
@@ -332,7 +332,7 @@ async function createRecipe(input) {
       input.name || "Untitled Recipe",
       input.product_type || "",
       input.flavor || "",
-      input.recipe_card_type === "Vape" ? "Vape" : "Edible/Topical",
+      input.recipe_card_type === "Vape" ? "Vape" : input.recipe_card_type === "Distillate/Resin Blend" ? "Distillate/Resin Blend" : "Edible/Topical",
       writableRecipeStatus(input.status),
       input.current_version || "",
       input.has_unpublished_changes ? 1 : 0,
@@ -376,7 +376,7 @@ async function updateRecipe(id, input) {
       next.name || "Untitled Recipe",
       next.product_type || "",
       next.flavor || "",
-      next.recipe_card_type === "Vape" ? "Vape" : "Edible/Topical",
+      next.recipe_card_type === "Vape" ? "Vape" : next.recipe_card_type === "Distillate/Resin Blend" ? "Distillate/Resin Blend" : "Edible/Topical",
       writableRecipeStatus(next.status),
       next.current_version || "",
       publishedDirty ? 1 : 0,
@@ -692,7 +692,7 @@ async function upsertProductionItems(items = []) {
         updated_at = CURRENT_TIMESTAMP`,
       [
         item.item_name,
-        item.recipe_card_type === "Vape" ? "Vape" : "Edible/Topical",
+        item.recipe_card_type === "Vape" ? "Vape" : item.recipe_card_type === "Distillate/Resin Blend" ? "Distillate/Resin Blend" : "Edible/Topical",
         item.product_type || "",
         item.flavor || "",
         item.sku || "",

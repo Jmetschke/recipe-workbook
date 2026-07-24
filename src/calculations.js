@@ -26,6 +26,10 @@ function isVapeRecipe(recipe = {}) {
   return recipe.recipe_card_type === "Vape";
 }
 
+function isDistillateResinBlendRecipe(recipe = {}) {
+  return recipe.recipe_card_type === "Distillate/Resin Blend";
+}
+
 function vapeDistillateGrams(recipe = {}) {
   return number(recipe.batch_size) * 1000;
 }
@@ -164,6 +168,12 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
   const formulaTotal = ingredients.reduce((sum, item) => sum + number(item.formula_qty), 0);
   const batchSizeInput = number(recipe.batch_size);
   const unitWeight = number(recipe.unit_weight);
+  const blendStartingDistillatePercent = isDistillateResinBlendRecipe(recipe) ? normalizePercent(recipe.potency_percent) : 0;
+  const blendGoalDistillatePercent = isDistillateResinBlendRecipe(recipe) ? normalizePercent(recipe.target_mg_per_unit) : 0;
+  const blendResinNeeded = blendStartingDistillatePercent > 0 && blendGoalDistillatePercent > 0 && blendGoalDistillatePercent < blendStartingDistillatePercent
+    ? (batchSizeInput * blendStartingDistillatePercent / blendGoalDistillatePercent) - batchSizeInput
+    : 0;
+  const blendFinalBatchGrams = batchSizeInput + blendResinNeeded;
   const batchSizeMode = isVapeRecipe(recipe) ? "liters" : recipe.batch_size_mode === "units" ? "units" : "grams";
   const distillateGrams = isVapeRecipe(recipe) ? vapeDistillateGrams(recipe) : 0;
   const terpenePercent = isVapeRecipe(recipe) ? vapeTerpenePercent(recipe) : 0;
@@ -171,7 +181,11 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
     ? (distillateGrams * terpenePercent) / (1 - terpenePercent)
     : 0;
   const vapeFinalBatchGrams = distillateGrams + terpeneTotalGrams;
-  const totalBatchGrams = isVapeRecipe(recipe) ? vapeFinalBatchGrams : batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
+  const totalBatchGrams = isVapeRecipe(recipe)
+    ? vapeFinalBatchGrams
+    : isDistillateResinBlendRecipe(recipe)
+      ? blendFinalBatchGrams
+      : batchSizeMode === "units" ? batchSizeInput * unitWeight : batchSizeInput;
   const estimatedYield = isVapeRecipe(recipe) ? totalBatchGrams / vapeUnitSize(recipe) : batchSizeMode === "units" ? batchSizeInput : unitWeight > 0 ? totalBatchGrams / unitWeight : 0;
   const vapeTerpenes = isVapeRecipe(recipe) ? normalizeVapeTerpenes(recipe, terpeneTotalGrams, vapeFinalBatchGrams) : [];
   const terpeneByIndex = new Map();
@@ -197,6 +211,16 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
         unit: "grams"
       };
     }
+    if (isDistillateResinBlendRecipe(recipe)) {
+      const batchQty = index === 0 ? batchSizeInput : index === 1 ? blendResinNeeded : number(item.batch_qty);
+      return {
+        ...item,
+        formula_qty: batchQty,
+        formula_percent: totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0,
+        batch_qty: batchQty,
+        unit: "grams"
+      };
+    }
     const formulaPercent = item.formula_percent !== undefined && item.formula_percent !== null && item.formula_percent !== ""
       ? normalizePercent(item.formula_percent)
       : formulaTotal > 0
@@ -218,7 +242,9 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
   const normalizedFormulaTotal = normalizedIngredients.reduce((sum, item) => sum + number(item.formula_qty), 0);
   const activeAdditives = isVapeRecipe(recipe)
     ? vapeTerpenes
-    : normalizeActiveAdditives(recipe, normalizedIngredients, estimatedYield);
+    : isDistillateResinBlendRecipe(recipe)
+      ? []
+      : normalizeActiveAdditives(recipe, normalizedIngredients, estimatedYield);
   const activeMassPerUnitMg = activeAdditives.reduce((sum, row) => sum + number(row.physical_mg_per_unit), 0);
   const activeMassPerUnitGrams = activeAdditives.reduce((sum, row) => sum + number(row.physical_grams_per_unit), 0);
   const activeIngredientGrams = activeAdditives.reduce((sum, row) => sum + number(row.calculated_grams), 0);
@@ -234,7 +260,7 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
     warnings.push(`Formula percentages total ${(percentTotal * 100).toFixed(2)}%, not 100%.`);
   }
 
-  if (!isVapeRecipe(recipe)) {
+  if (!isVapeRecipe(recipe) && !isDistillateResinBlendRecipe(recipe)) {
     normalizedIngredients.forEach((item) => {
       const name = `${item.ingredient_name || ""}`.toLowerCase();
       if ((name.includes("additive") || name.includes("concentrate") || name.includes("active")) && item.formula_percent * 100 > additiveLimit) {
@@ -261,6 +287,11 @@ function calculateRecipe(recipe, ingredients = [], settings = {}) {
     terpene_percent: terpenePercent,
     terpene_total_grams: terpeneTotalGrams,
     final_batch_grams: isVapeRecipe(recipe) ? vapeFinalBatchGrams : totalBatchGrams,
+    blend_starting_grams: isDistillateResinBlendRecipe(recipe) ? batchSizeInput : 0,
+    blend_starting_distillate_percent: blendStartingDistillatePercent,
+    blend_starting_resin_percent: isDistillateResinBlendRecipe(recipe) ? Math.max(1 - blendStartingDistillatePercent, 0) : 0,
+    blend_goal_distillate_percent: blendGoalDistillatePercent,
+    blend_resin_needed_grams: blendResinNeeded,
     active_ingredient_grams: activeIngredientGrams,
     total_active_additive_grams: activeIngredientGrams,
     active_mass_per_unit_mg: activeMassPerUnitMg,
