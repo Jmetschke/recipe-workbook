@@ -382,6 +382,11 @@ input[readonly] {
   cursor: not-allowed;
 }
 
+.calculation-pending {
+  color: #8a4b08;
+  font-weight: 700;
+}
+
 .calendar-weekdays,
 .calendar-grid {
   display: grid;

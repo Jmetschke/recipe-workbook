@@ -936,7 +936,7 @@ async function renderEditor(id, recipe = null, mode = null) {
   const blendRecipe = isDistillateResinBlendRecipe(r);
   const identityLocked = readOnlyRecipe;
   const headerLocked = readOnlyRecipe;
-  setPage(r.name, readOnlyRecipe ? `${templateRecipe ? "Template" : "Published recipe"} is read-only. Select Edit to make changes.` : "Edit recipe fields and calculated batch quantities.");
+  setPage(r.name, readOnlyRecipe ? `${templateRecipe ? "Template" : "Published recipe"} is read-only. Select Edit to make changes.` : "Make all needed recipe changes, then apply them to update the calculated quantities.");
   content.innerHTML = `
     <section class="section">
       <div class="section-header">
@@ -998,8 +998,9 @@ async function renderEditor(id, recipe = null, mode = null) {
       <textarea id="notesField" ${readOnlyRecipe ? "readonly" : ""}>${(r.notes || []).join("\n")}</textarea>
     </section>
     <section class="section no-print">
+      ${readOnlyRecipe ? "" : '<p id="calculationStatus" class="helper">Calculated quantities reflect the last applied values. Make multiple edits, then use the button below.</p>'}
       <div class="toolbar">
-        ${readOnlyRecipe ? "" : '<button id="recalculate">Recalculate</button>'}
+        ${readOnlyRecipe ? "" : '<button id="recalculate" class="primary">Apply Changes &amp; Recalculate</button>'}
         ${r.current_version && !templateLocked ? '<button id="previewCard">Preview Final Card</button>' : ""}
       </div>
     </section>
@@ -1341,6 +1342,21 @@ function refreshCalculationDisplay(updateRows = false) {
   });
 }
 
+function markCalculationsPending() {
+  const status = content.querySelector("#calculationStatus");
+  if (!status) return;
+  status.textContent = "Changes are waiting to be applied. Calculated quantities below still reflect the previous values.";
+  status.classList.add("calculation-pending");
+}
+
+function rerenderActiveAdditiveTool() {
+  const activeTool = content.querySelector("#activeAdditiveTool");
+  if (!activeTool) return;
+  const locked = state.editorMode === "published-view" || state.editorMode === "template-view";
+  activeTool.outerHTML = renderActiveAdditiveTool(state.currentRecipe, locked);
+  bindActiveAdditiveTool();
+}
+
 function applyAdditiveCalculationsToMatches() {
   if (isVapeRecipe()) return 0;
   const ingredients = state.currentRecipe.ingredients || [];
@@ -1400,8 +1416,8 @@ function bindActiveAdditiveTool() {
       if (input.dataset.additiveField === "concentration_type" && additive.concentration_type === "mg_per_unit" && !additive.mg_per_unit) {
         additive.mg_per_unit = additive.target_mg_per_unit || "";
       }
-      if (!isVapeRecipe()) applyAdditiveCalculationsToMatches();
-      refreshCalculationDisplay(true);
+      markCalculationsPending();
+      rerenderActiveAdditiveTool();
     };
     input.addEventListener("change", updateAdditive);
   });
@@ -1425,17 +1441,20 @@ function bindActiveAdditiveTool() {
     const newIndex = state.currentRecipe.ingredients.push(ingredient) - 1;
     state.currentRecipe.active_additives.push(newAdditiveCalculation(name, String(newIndex)));
     renderIngredientRows();
-    refreshCalculationDisplay(true);
+    rerenderActiveAdditiveTool();
+    markCalculationsPending();
     showToast("New additive added to recipe and calculator.");
   });
   content.querySelector("#addAdditiveCalculation")?.addEventListener("click", () => {
     state.currentRecipe.active_additives.push(newAdditiveCalculation("", ""));
-    refreshCalculationDisplay(true);
+    rerenderActiveAdditiveTool();
+    markCalculationsPending();
     showToast("New additive calculation added.");
   });
   content.querySelectorAll("[data-remove-additive]").forEach((button) => button.addEventListener("click", () => {
     state.currentRecipe.active_additives.splice(Number(button.dataset.removeAdditive), 1);
-    refreshCalculationDisplay(true);
+    rerenderActiveAdditiveTool();
+    markCalculationsPending();
     showToast("Additive calculation removed.");
   }));
 }
@@ -1473,6 +1492,11 @@ function renderIngredientRows() {
       }
       const updateIngredientField = () => {
         state.currentRecipe.ingredients[index][input.dataset.field] = input.type === "number" ? Number(input.value) : input.value;
+        if (input.dataset.field === "formula_qty") {
+          state.currentRecipe._formulaQtyEdited = true;
+        } else if (input.dataset.field === "formula_percent") {
+          state.currentRecipe.ingredients[index]._formulaPercentEdited = true;
+        }
         if (input.dataset.field === "ingredient_name") {
           const master = masterIngredientByName(input.value);
           if (master) {
@@ -1485,8 +1509,7 @@ function renderIngredientRows() {
           state.currentRecipe.ingredients[index].match_status = "matched";
           state.currentRecipe.ingredients[index].match_confidence = 1;
         }
-        mirrorFormulaField(index, input.dataset.field);
-        refreshCalculationDisplay(["formula_qty", "formula_percent"].includes(input.dataset.field));
+        markCalculationsPending();
       };
       input.addEventListener("input", updateIngredientField);
       input.addEventListener("change", updateIngredientField);
@@ -1498,7 +1521,7 @@ function renderIngredientRows() {
       removeButton.addEventListener("click", () => {
         state.currentRecipe.ingredients.splice(index, 1);
         renderIngredientRows();
-        refreshCalculationDisplay(true);
+        markCalculationsPending();
       });
     }
     tbody.appendChild(row);
@@ -1564,6 +1587,19 @@ function collectRecipe() {
   content.querySelectorAll("[name]").forEach((input) => {
     state.currentRecipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
   });
+  if (state.currentRecipe._formulaQtyEdited) {
+    const formulaTotal = (state.currentRecipe.ingredients || []).reduce((sum, item) => sum + numeric(item.formula_qty), 0);
+    (state.currentRecipe.ingredients || []).forEach((item) => {
+      item.formula_percent = formulaTotal > 0 ? numeric(item.formula_qty) / formulaTotal : 0;
+      delete item._formulaPercentEdited;
+    });
+  } else {
+    (state.currentRecipe.ingredients || []).forEach((item, index) => {
+      if (item._formulaPercentEdited) mirrorFormulaField(index, "formula_percent");
+      delete item._formulaPercentEdited;
+    });
+  }
+  delete state.currentRecipe._formulaQtyEdited;
   syncVapeDistillateIngredient(state.currentRecipe);
   syncDistillateResinBlendIngredients(state.currentRecipe);
   state.currentRecipe.batch_unit = isVapeRecipe() ? "L" : "grams";
@@ -1590,7 +1626,7 @@ function bindEditor() {
       syncVapeDistillateIngredient(state.currentRecipe);
       syncDistillateResinBlendIngredients(state.currentRecipe);
       state.currentRecipe.batch_unit = isVapeRecipe() ? "L" : "grams";
-      refreshCalculationDisplay(true);
+      markCalculationsPending();
     };
     input.addEventListener("input", updateHeader);
     input.addEventListener("change", updateHeader);
@@ -1620,7 +1656,7 @@ function bindEditor() {
   content.querySelector("#addIngredient")?.addEventListener("click", () => {
     state.currentRecipe.ingredients.push({ ingredient_type: "", ingredient_name: "", unit: isVapeRecipe() ? "L" : "grams", formula_qty: 0, formula_percent: 0, batch_qty: 0 });
     renderIngredientRows();
-    refreshCalculationDisplay(true);
+    markCalculationsPending();
   });
   content.querySelector("#addStep")?.addEventListener("click", () => {
     state.currentRecipe.steps.push({ instruction_text: "" });
