@@ -593,6 +593,40 @@ function recipeSections(recipes, filter = "All") {
   `;
 }
 
+function dashboardTemplateImportMarkup() {
+  return `
+    <section class="recipe-list-section template-import-section">
+      <div class="section-header">
+        <div>
+          <h2>Import Template</h2>
+          <p class="helper">Import an exported template file from another version or installation of Recipe Manager.</p>
+        </div>
+      </div>
+      <form id="dashboardTemplateImportForm" class="toolbar">
+        <input type="file" name="template" accept=".json,.recipe-template,.recipe-template.json,application/json" required>
+        <button class="primary" type="submit">Import Template File</button>
+      </form>
+      <p class="helper">Choose a <strong>.recipe-template.json</strong> file created with Export Template.</p>
+    </section>
+  `;
+}
+
+function bindDashboardTemplateImport() {
+  content.querySelector("#dashboardTemplateImportForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const form = new FormData(event.currentTarget);
+      const template = await api("/api/templates/import", { method: "POST", body: form });
+      showToast(`${template.name} imported as a template.`);
+      renderDashboard("Template");
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  });
+}
+
 async function renderDashboard(filter = "All") {
   state.view = filter === "Template" ? "templates" : filter === "Draft" ? "drafts" : filter === "Archived" ? "archived" : "dashboard";
   if (filter === "All") state.dashboardWindowStartKey = localDateKey(startOfWeek());
@@ -620,6 +654,7 @@ async function renderDashboard(filter = "All") {
         </div>
       </div>
       ${filter === "All" ? renderDashboardMiniCalendar(visibleRecipes) : ""}
+      ${filter === "All" || filter === "Template" ? dashboardTemplateImportMarkup() : ""}
       <div id="recipeList">${recipeSections(visibleRecipes, filter)}</div>
     </section>
   `;
@@ -633,6 +668,7 @@ async function renderDashboard(filter = "All") {
     bindRecipeListButtons();
   });
   content.querySelector("#statusFilter").addEventListener("change", (event) => renderDashboard(event.target.value));
+  bindDashboardTemplateImport();
   bindRecipeListButtons();
 }
 
@@ -943,7 +979,7 @@ async function renderEditor(id, recipe = null, mode = null) {
         <div>${statusBadge(r)}</div>
         <div class="toolbar">
           <button id="closeWithoutSaving">Close Without Saving</button>
-          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="unpublishRecipe">Unpublish</button><button id="deleteRecipe" class="danger">Delete</button>' : templateLocked ? '<button id="editTemplate" class="primary">Edit</button><button id="exportTemplateRecipe">Export Template</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">${editingPublishedRecord ? "Save Changes" : "Save Draft"}</button>${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
+          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="unpublishRecipe">Unpublish</button><button id="deleteRecipe" class="danger">Delete</button>' : templateLocked ? '<button id="editTemplate" class="primary">Edit</button><button id="exportTemplateRecipe">Export Template</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">${editingPublishedRecord ? "Save Changes" : "Save Draft"}</button>${templateRecipe && r.id ? '<button id="exportTemplateRecipe">Export Template</button>' : ""}${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
           ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
           ${r.id && !publishedView && !templateRecipe ? '<button id="makeTemplate">Make Template</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
           ${r.id && templateLocked ? '<button id="archiveRecipe" class="danger">Archive Template</button>' : ""}
