@@ -715,7 +715,7 @@ input[readonly] {
   height: 42px;
 }
 
-@media (max-width: 1060px) {
+@media screen and (max-width: 1060px) {
   .sidebar {
     width: 210px;
   }
@@ -725,7 +725,7 @@ input[readonly] {
   }
 }
 
-@media (max-width: 900px) {
+@media screen and (max-width: 900px) {
   .location-nav {
     align-items: flex-start;
     flex-direction: column;
@@ -815,7 +815,7 @@ input[readonly] {
   }
 }
 
-@media (max-width: 640px) {
+@media screen and (max-width: 640px) {
   body {
     background: #fff;
   }
@@ -1023,7 +1023,24 @@ input[readonly] {
   }
 }
 
+@page {
+  size: Letter;
+  margin: 0.5in;
+}
+
 @media print {
+  html,
+  body,
+  .app {
+    min-height: 0;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .location-nav,
+  .install-dialog,
   .sidebar,
   .topbar,
   .toast,
@@ -1035,15 +1052,41 @@ input[readonly] {
   #content {
     margin: 0;
     padding: 0;
+    width: 100%;
   }
 
   .card-page {
     border: 0;
+    margin: 0;
     max-width: none;
     padding: 0;
+    width: 100%;
   }
 
-  .ingredient-print-table .handwrite-cell {
-    height: 48px;
+  thead {
+    display: table-header-group;
+  }
+
+  tr,
+  .signature-grid,
+  .section-header,
+  .grid > div,
+  ol > li {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  p,
+  ol,
+  ul {
+    orphans: 3;
+    widows: 3;
   }
 }
