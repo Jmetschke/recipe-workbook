@@ -860,8 +860,8 @@ function bindRecipeListButtons() {
   }));
   content.querySelectorAll("[data-duplicate-new]").forEach((button) => button.addEventListener("click", async () => {
     const copy = await api(`/api/recipes/${button.dataset.duplicateNew}/duplicate-new`, { method: "POST", body: {} });
-    showToast("Started a new recipe from the duplicate.");
-    renderEditor(copy.id);
+    showToast("New recipe started. Edit the recipe name and details, then save your draft.");
+    renderEditor(copy.id, copy, "draft");
   }));
   content.querySelectorAll("[data-archive-card]").forEach((button) => button.addEventListener("click", async () => {
     if (!window.confirm("Archive this recipe?")) return;
@@ -964,7 +964,7 @@ async function renderEditor(id, recipe = null, mode = null) {
   const templateView = state.editorMode === "template-view";
   const templateEdit = state.editorMode === "template-edit";
   const templateRecipe = r.status === "Template";
-  const templateLocked = templateView && !r.is_new_recipe_duplicate;
+  const templateLocked = templateView;
   const readOnlyRecipe = publishedView || templateLocked;
   const editingPublishedRecord = publishedEdit || templateEdit;
   const savingAsNewDocument = !r.id && Boolean(r.copied_from_recipe_id);
@@ -1731,8 +1731,8 @@ function bindEditor() {
   });
   content.querySelector("#duplicateNewRecipe")?.addEventListener("click", async () => {
     const copy = await api(`/api/recipes/${state.currentRecipe.id}/duplicate-new`, { method: "POST", body: {} });
-    showToast("Started a new recipe from duplicate.");
-    renderEditor(copy.id);
+    showToast("New recipe started. Edit the recipe name and details, then save your draft.");
+    renderEditor(copy.id, copy, "draft");
   });
   content.querySelector("#makeTemplate")?.addEventListener("click", async () => {
     const payload = collectRecipe();
