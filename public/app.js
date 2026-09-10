@@ -967,6 +967,7 @@ async function renderEditor(id, recipe = null, mode = null) {
   const templateLocked = templateView && !r.is_new_recipe_duplicate;
   const readOnlyRecipe = publishedView || templateLocked;
   const editingPublishedRecord = publishedEdit || templateEdit;
+  const savingAsNewDocument = !r.id && Boolean(r.copied_from_recipe_id);
   const formulaLocked = readOnlyRecipe || (Boolean(r.copy_lock_formula) && !editingPublishedRecord);
   const vapeRecipe = isVapeRecipe(r);
   const blendRecipe = isDistillateResinBlendRecipe(r);
@@ -979,7 +980,7 @@ async function renderEditor(id, recipe = null, mode = null) {
         <div>${statusBadge(r)}</div>
         <div class="toolbar">
           <button id="closeWithoutSaving">Close Without Saving</button>
-          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="unpublishRecipe">Unpublish</button><button id="deleteRecipe" class="danger">Delete</button>' : templateLocked ? '<button id="editTemplate" class="primary">Edit</button><button id="exportTemplateRecipe">Export Template</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">${editingPublishedRecord ? "Save Changes" : "Save Draft"}</button>${templateRecipe && r.id ? '<button id="exportTemplateRecipe">Export Template</button>' : ""}${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
+          ${publishedView ? '<button id="editPublished" class="primary">Edit</button><button id="unpublishRecipe">Unpublish</button><button id="deleteRecipe" class="danger">Delete</button>' : templateLocked ? '<button id="editTemplate" class="primary">Edit</button><button id="exportTemplateRecipe">Export Template</button><button id="deleteRecipe" class="danger">Delete</button>' : `<button id="saveRecipe" class="primary">${editingPublishedRecord ? "Save Changes" : savingAsNewDocument ? "Save as New Document" : "Save Draft"}</button>${templateRecipe && r.id ? '<button id="exportTemplateRecipe">Export Template</button>' : ""}${r.id ? '<button id="deleteRecipe" class="danger">Delete</button>' : ""}`}
           ${r.id ? '<button id="duplicateRecipe">Duplicate Recipe</button><button id="duplicateNewRecipe">Duplicate and Start New Recipe</button>' : ""}
           ${r.id && !publishedView && !templateRecipe ? '<button id="makeTemplate">Make Template</button><button id="publishRecipe">Publish New Version</button><button id="archiveRecipe" class="danger">Archive Recipe</button>' : ""}
           ${r.id && templateLocked ? '<button id="archiveRecipe" class="danger">Archive Template</button>' : ""}
@@ -1700,11 +1701,12 @@ function bindEditor() {
   });
   content.querySelector("#saveRecipe")?.addEventListener("click", async () => {
     const payload = collectRecipe();
+    const savedAsNewDocument = !payload.id && Boolean(payload.copied_from_recipe_id);
     const saved = payload.id
       ? await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload })
       : await api("/api/recipes", { method: "POST", body: payload });
     const savedPublishedRecord = state.editorMode === "published-edit" || state.editorMode === "template-edit";
-    showToast(savedPublishedRecord ? "Changes saved." : payload.status === "Template" ? "Template saved." : "Draft saved.");
+    showToast(savedPublishedRecord ? "Changes saved." : savedAsNewDocument ? "New document saved." : payload.status === "Template" ? "Template saved." : "Draft saved.");
     if (savedPublishedRecord) {
       renderEditor(saved.id, saved, saved.status === "Template" ? "template-view" : "published-view");
     } else {
@@ -2061,7 +2063,7 @@ async function renderVersionCard(versionId) {
     ? theoreticalBatchGrams * 0.95
     : numeric(calculations.real_batch_grams);
   content.innerHTML = `
-    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="printIngredientsList">Printable Ingredients List</button><button id="unpublishCardRecipe">Unpublish</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
+    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="printIngredientsList">Printable Ingredients List</button><button id="duplicateAndEditCard" class="primary">Duplicate &amp; Edit</button><button id="unpublishCardRecipe">Unpublish</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
     <article class="card-page">
       <header class="section-header">
         <div>
@@ -2112,6 +2114,24 @@ async function renderVersionCard(versionId) {
     </article>
   `;
   content.querySelector("#printIngredientsList").addEventListener("click", () => renderPrintableIngredientList(version));
+  content.querySelector("#duplicateAndEditCard").addEventListener("click", () => {
+    const copy = {
+      ...recipe,
+      id: undefined,
+      name: `${recipe.name} Copy`,
+      status: "Draft",
+      current_version: suggestNextVersion(version.version_number),
+      has_unpublished_changes: false,
+      copied_from_recipe_id: recipe.id,
+      copy_lock_formula: false,
+      is_new_recipe_duplicate: true,
+      ingredients: version.ingredients.map((item) => ({ ...item, id: undefined, recipe_id: undefined })),
+      steps: version.steps.map((step) => ({ ...step, id: undefined, recipe_id: undefined })),
+      calculations: { ...calculations }
+    };
+    showToast("Published card duplicated. Edit it, then select Save as New Document.");
+    renderEditor(null, copy);
+  });
   content.querySelector("#unpublishCardRecipe").addEventListener("click", () => unpublishRecipeFromUi(recipe.id, "Draft"));
   content.querySelector("#backCards").addEventListener("click", () => renderCards());
   content.querySelector("#deleteCardRecipe").addEventListener("click", async () => {
