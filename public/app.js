@@ -2063,7 +2063,7 @@ async function renderVersionCard(versionId) {
     ? theoreticalBatchGrams * 0.95
     : numeric(calculations.real_batch_grams);
   content.innerHTML = `
-    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="printIngredientsList">Printable Ingredients List</button><button id="duplicateAndEditCard" class="primary">Duplicate &amp; Edit</button><button id="unpublishCardRecipe">Unpublish</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
+    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="downloadRecipePdf">Download PDF</button><button id="printIngredientsList">Printable Ingredients List</button><button id="duplicateAndEditCard" class="primary">Duplicate &amp; Edit</button><button id="unpublishCardRecipe">Unpublish</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
     <article class="card-page">
       <header class="section-header">
         <div>
@@ -2113,6 +2113,26 @@ async function renderVersionCard(versionId) {
       </div>
     </article>
   `;
+  content.querySelector("#downloadRecipePdf").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/versions/${encodeURIComponent(versionId)}/pdf`);
+      if (!response.ok) throw new Error("Unable to download the published recipe PDF. Please try again.");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${recipe.name || "recipe"}-${version.version_number || versionId}.pdf`.replace(/[/\\:*?"<>|]/g, "-");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
   content.querySelector("#printIngredientsList").addEventListener("click", () => renderPrintableIngredientList(version));
   content.querySelector("#duplicateAndEditCard").addEventListener("click", () => {
     const copy = {

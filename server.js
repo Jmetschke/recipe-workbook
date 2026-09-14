@@ -3,6 +3,7 @@ const path = require("path");
 const express = require("express");
 const multer = require("multer");
 const { parseWorkbook } = require("./src/parser");
+const { createRecipePdf } = require("./src/recipePdf");
 const {
   usingTurso,
   migrate,
@@ -175,6 +176,18 @@ app.get("/api/versions/:versionId", asyncRoute(async (req, res) => {
   const version = await getVersion(req.params.versionId);
   if (!version) return res.status(404).json({ error: "Version not found" });
   return res.json(version);
+}));
+
+app.get("/api/versions/:versionId/pdf", asyncRoute(async (req, res) => {
+  const version = await getVersion(req.params.versionId);
+  if (!version) return res.status(404).json({ error: "Version not found" });
+  const pdf = await createRecipePdf(version);
+  const name = `${version.recipe.name || "recipe"}-${version.version_number || version.id}`
+    .replace(/[^a-z0-9._-]+/gi, "-").slice(0, 150);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${name}.pdf"`);
+  res.setHeader("Cache-Control", "no-store");
+  return res.send(pdf);
 }));
 
 app.post("/api/import/xlsx", upload.single("workbook"), asyncRoute(async (req, res) => {
