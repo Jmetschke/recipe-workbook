@@ -968,7 +968,7 @@ async function renderEditor(id, recipe = null, mode = null) {
   const readOnlyRecipe = publishedView || templateLocked;
   const editingPublishedRecord = publishedEdit || templateEdit;
   const savingAsNewDocument = !r.id && Boolean(r.copied_from_recipe_id);
-  const formulaLocked = readOnlyRecipe || (Boolean(r.copy_lock_formula) && !editingPublishedRecord);
+  const formulaLocked = readOnlyRecipe || Boolean(r.copy_lock_formula);
   const vapeRecipe = isVapeRecipe(r);
   const blendRecipe = isDistillateResinBlendRecipe(r);
   const identityLocked = readOnlyRecipe;
@@ -1002,14 +1002,17 @@ async function renderEditor(id, recipe = null, mode = null) {
         ${vapeRecipe ? selectField("vape_unit_size", "Unit size", r.vape_unit_size || 1, [[1, "1g units"], [2, "2g units"]], "Used to calculate theoretical and real yield units from the final batch grams.", readOnlyRecipe) : ""}
         ${vapeRecipe || blendRecipe ? "" : field("unit_weight_unit", "Weight unit", r.unit_weight_unit, "", "text", headerLocked)}
       </div>
-      ${formulaLocked ? '<div class="warning">This recipe formula is locked. Formula quantity, formula percent, and batch quantity are not directly editable, but recalculations can still update them.</div>' : ""}
+      ${formulaLocked ? '<div class="warning">This recipe formula is locked. Select Unlock Formula in the Ingredients section to change quantities, add ingredients, or remove ingredients. Batch quantities are calculated automatically.</div>' : ""}
     </section>
     ${renderMetrics(r)}
     ${renderActiveAdditiveTool(r, readOnlyRecipe)}
     <section class="section">
       <div class="section-header">
         <h2>Ingredients</h2>
-        ${formulaLocked ? "" : '<button id="addIngredient">Add Ingredient</button>'}
+        <div class="toolbar">
+          ${readOnlyRecipe ? "" : `<button id="toggleFormulaLock">${formulaLocked ? "Unlock Formula" : "Lock Formula"}</button>`}
+          ${formulaLocked ? "" : '<button id="addIngredient">Add Ingredient</button>'}
+        </div>
       </div>
       <div class="table-wrap ingredient-table-wrap">
         <table class="ingredient-table">
@@ -1500,8 +1503,7 @@ function renderIngredientRows() {
   const tbody = content.querySelector("#ingredientRows");
   tbody.innerHTML = "";
   const readOnlyRecipe = state.editorMode === "published-view" || state.editorMode === "template-view";
-  const editingPublishedRecord = state.editorMode === "published-edit" || state.editorMode === "template-edit";
-  const formulaLocked = readOnlyRecipe || (Boolean(state.currentRecipe.copy_lock_formula) && !editingPublishedRecord);
+  const formulaLocked = readOnlyRecipe || Boolean(state.currentRecipe.copy_lock_formula);
   (state.currentRecipe.ingredients || []).forEach((item, index) => {
     const row = document.querySelector("#recipeRowTemplate").content.firstElementChild.cloneNode(true);
     row.dataset.index = index;
@@ -1557,7 +1559,17 @@ function renderIngredientRows() {
     } else {
       removeButton.addEventListener("click", () => {
         state.currentRecipe.ingredients.splice(index, 1);
+        state.currentRecipe.active_additives = (state.currentRecipe.active_additives || [])
+          .filter((additive) => additive.ingredient_index === "" || additive.ingredient_index == null || Number(additive.ingredient_index) !== index)
+          .map((additive) => ({
+            ...additive,
+            ingredient_index: Number(additive.ingredient_index) > index
+              ? String(Number(additive.ingredient_index) - 1)
+              : additive.ingredient_index
+          }));
+        state.currentRecipe._formulaQtyEdited = true;
         renderIngredientRows();
+        rerenderActiveAdditiveTool();
         markCalculationsPending();
       });
     }
@@ -1656,6 +1668,13 @@ function collectRecipe() {
 
 function bindEditor() {
   bindActiveAdditiveTool();
+
+  content.querySelector("#toggleFormulaLock")?.addEventListener("click", async () => {
+    const recipe = collectRecipe();
+    recipe.copy_lock_formula = !recipe.copy_lock_formula;
+    await renderEditor(recipe.id, recipe, state.editorMode);
+    showToast(recipe.copy_lock_formula ? "Formula locked. Save to keep this change." : "Formula unlocked. You can now add, edit, or remove ingredients.");
+  });
 
   content.querySelectorAll("[name]").forEach((input) => {
     const updateHeader = () => {
