@@ -842,7 +842,7 @@ async function unpublishRecipeFromUi(recipeId, after = "Draft") {
   state.recipes = state.recipes.filter((recipe) => recipe.id !== draft.id).concat(draft);
   showToast("Recipe moved back to Drafts.");
   if (after === "cards") renderCards();
-  else renderDashboard("Draft");
+  else renderEditor(draft.id, draft, "draft");
 }
 
 function bindRecipeListButtons() {
@@ -1010,7 +1010,7 @@ async function renderEditor(id, recipe = null, mode = null) {
       <div class="section-header">
         <h2>Ingredients</h2>
         <div class="toolbar">
-          ${readOnlyRecipe ? "" : `<button id="toggleFormulaLock">${formulaLocked ? "Unlock Formula" : "Lock Formula"}</button>`}
+          <button id="toggleFormulaLock">${formulaLocked ? "Unlock Formula" : "Lock Formula"}</button>
           ${formulaLocked ? "" : '<button id="addIngredient">Add Ingredient</button>'}
         </div>
       </div>
@@ -1670,9 +1670,11 @@ function bindEditor() {
   bindActiveAdditiveTool();
 
   content.querySelector("#toggleFormulaLock")?.addEventListener("click", async () => {
-    const recipe = collectRecipe();
-    recipe.copy_lock_formula = !recipe.copy_lock_formula;
-    await renderEditor(recipe.id, recipe, state.editorMode);
+    const readOnly = state.editorMode === "published-view" || state.editorMode === "template-view";
+    const recipe = readOnly ? state.currentRecipe : collectRecipe();
+    const mode = readOnly ? (recipe.status === "Template" ? "template-edit" : "published-edit") : state.editorMode;
+    recipe.copy_lock_formula = readOnly ? false : !recipe.copy_lock_formula;
+    await renderEditor(recipe.id, recipe, mode);
     showToast(recipe.copy_lock_formula ? "Formula locked. Save to keep this change." : "Formula unlocked. You can now add, edit, or remove ingredients.");
   });
 
@@ -2082,7 +2084,7 @@ async function renderVersionCard(versionId) {
     ? theoreticalBatchGrams * 0.95
     : numeric(calculations.real_batch_grams);
   content.innerHTML = `
-    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="downloadRecipePdf">Download PDF</button><button id="printIngredientsList">Printable Ingredients List</button><button id="duplicateAndEditCard" class="primary">Duplicate &amp; Edit</button><button id="unpublishCardRecipe">Unpublish</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
+    <div class="toolbar no-print"><button onclick="window.print()" class="primary">Print Recipe Card</button><button id="downloadRecipePdf">Download PDF</button><button id="printIngredientsList">Printable Ingredients List</button><button id="unlockCardRecipe" class="primary">Unlock Formula / Edit Ingredients</button><button id="duplicateAndEditCard" class="primary">Duplicate &amp; Edit</button><button id="unpublishCardRecipe">Unpublish</button><button id="backCards">Back</button><button id="deleteCardRecipe" class="danger">Delete</button></div>
     <article class="card-page">
       <header class="section-header">
         <div>
@@ -2170,6 +2172,12 @@ async function renderVersionCard(versionId) {
     };
     showToast("Published card duplicated. Edit it, then select Save as New Document.");
     renderEditor(null, copy);
+  });
+  content.querySelector("#unlockCardRecipe").addEventListener("click", async () => {
+    const current = await api(`/api/recipes/${recipe.id}`);
+    current.copy_lock_formula = false;
+    await renderEditor(current.id, current, current.status === "Published" ? "published-edit" : current.status === "Template" ? "template-edit" : "draft");
+    showToast("Formula unlocked. Edit ingredients, then save your changes.");
   });
   content.querySelector("#unpublishCardRecipe").addEventListener("click", () => unpublishRecipeFromUi(recipe.id, "Draft"));
   content.querySelector("#backCards").addEventListener("click", () => renderCards());
