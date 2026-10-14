@@ -1090,3 +1090,28 @@ input[readonly] {
     widows: 3;
   }
 }
+
+.blend-print-only { display: none; }
+.resin-blend-editor input[type="number"] { min-width: 100px; }
+.resin-blend-output td .helper { display: block; }
+.resin-blend-output .batch-qty-display { font-weight: 700; }
+@media print {
+  .blend-print-only { display: block; }
+  .resin-blend-output { font-size: 9px; }
+  .resin-blend-output tr { break-inside: avoid; }
+  .resin-blend-editor .table-wrap { overflow: visible; }
+}
+
+@media screen and (max-width: 700px) {
+  .resin-blend-input, .resin-blend-output,
+  .resin-blend-input tbody, .resin-blend-output tbody,
+  .resin-blend-input tr, .resin-blend-output tr,
+  .resin-blend-input td, .resin-blend-output td { display: block; width: 100%; min-width: 0; }
+  .resin-blend-input thead, .resin-blend-output thead, .resin-blend-output tfoot { display: none; }
+  .resin-blend-input tr, .resin-blend-output tr { margin-bottom: 16px; border: 1px solid #d9e2ec; border-radius: 8px; padding: 8px; }
+  .resin-blend-input td, .resin-blend-output td { padding: 6px; border: 0; text-align: left; }
+  .resin-blend-input td[data-mobile-label]::before, .resin-blend-output td[data-mobile-label]::before {
+    content: attr(data-mobile-label); display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;
+  }
+  .resin-blend-input input { width: 100%; min-width: 0; }
+}

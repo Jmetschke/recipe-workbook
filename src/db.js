@@ -172,6 +172,7 @@ async function migrate() {
   await addColumnIfMissing("recipes", "copy_lock_formula", "INTEGER DEFAULT 0");
   await addColumnIfMissing("recipes", "is_new_recipe_duplicate", "INTEGER DEFAULT 0");
   await addColumnIfMissing("recipes", "active_additives", "TEXT DEFAULT '[]'");
+  await addColumnIfMissing("recipes", "resin_blend", "TEXT DEFAULT '{}'");
   await execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ["additive_percent_limit", "4"]);
   await seedInventoryIngredients();
 }
@@ -193,6 +194,7 @@ function recipeFromRow(row) {
     has_unpublished_changes: Boolean(row.has_unpublished_changes),
     copy_lock_formula: Boolean(row.copy_lock_formula),
     is_new_recipe_duplicate: Boolean(row.is_new_recipe_duplicate),
+    resin_blend: row.resin_blend ? JSON.parse(row.resin_blend) : {},
     active_additives: row.active_additives ? JSON.parse(row.active_additives) : [],
     notes: row.notes ? JSON.parse(row.notes) : []
   };
@@ -285,7 +287,7 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
 async function calculateWithActiveMatches(recipe, ingredients) {
   const settings = await allSettings();
   const firstPass = calculateRecipe(recipe, ingredients, settings);
-  if (recipe.recipe_card_type === "Vape" || recipe.recipe_card_type === "Distillate/Resin Blend") return firstPass;
+  if (["Vape", "Distillate/Resin Blend", "Resin Blend Calculator"].includes(recipe.recipe_card_type)) return firstPass;
   const nextIngredients = firstPass.ingredients.map((item) => ({ ...item }));
   const totalBatchGrams = Number(firstPass.total_batch_grams || 0);
   if (totalBatchGrams <= 0) return firstPass;
@@ -326,17 +328,17 @@ async function createRecipe(input) {
     `INSERT INTO recipes (
       name, product_type, flavor, recipe_card_type, status, current_version, has_unpublished_changes, batch_size, batch_size_mode, batch_unit,
       unit_weight, unit_weight_unit, vape_unit_size, target_mg_per_unit, potency_percent, expected_production_date,
-      copied_from_recipe_id, copy_lock_formula, is_new_recipe_duplicate, active_additives, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      copied_from_recipe_id, copy_lock_formula, is_new_recipe_duplicate, active_additives, notes, resin_blend
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name || "Untitled Recipe",
       input.product_type || "",
       input.flavor || "",
-      input.recipe_card_type === "Vape" ? "Vape" : input.recipe_card_type === "Distillate/Resin Blend" ? "Distillate/Resin Blend" : "Edible/Topical",
+      ["Vape", "Distillate/Resin Blend", "Resin Blend Calculator"].includes(input.recipe_card_type) ? input.recipe_card_type : "Edible/Topical",
       writableRecipeStatus(input.status),
       input.current_version || "",
       input.has_unpublished_changes ? 1 : 0,
-      input.batch_size || 0,
+      input.recipe_card_type === "Resin Blend Calculator" ? calculations.total_batch_grams : input.batch_size || 0,
       input.recipe_card_type === "Vape" ? "liters" : input.batch_size_mode === "units" ? "units" : "grams",
       input.recipe_card_type === "Vape" ? "L" : "grams",
       input.unit_weight || 0,
@@ -349,7 +351,8 @@ async function createRecipe(input) {
       input.copy_lock_formula ? 1 : 0,
       input.is_new_recipe_duplicate ? 1 : 0,
       JSON.stringify(calculations.active_additives || input.active_additives || []),
-      JSON.stringify(input.notes || [])
+      JSON.stringify(input.notes || []),
+      JSON.stringify(input.resin_blend || {})
     ]
   );
   const recipeId = Number(info.lastInsertRowid);
@@ -370,17 +373,17 @@ async function updateRecipe(id, input) {
     `UPDATE recipes SET
       name = ?, product_type = ?, flavor = ?, recipe_card_type = ?, status = ?, current_version = ?, has_unpublished_changes = ?, batch_size = ?, batch_size_mode = ?, batch_unit = ?,
       unit_weight = ?, unit_weight_unit = ?, vape_unit_size = ?, target_mg_per_unit = ?, potency_percent = ?, expected_production_date = ?,
-      copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, active_additives = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+      copied_from_recipe_id = ?, copy_lock_formula = ?, is_new_recipe_duplicate = ?, active_additives = ?, notes = ?, resin_blend = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
     [
       next.name || "Untitled Recipe",
       next.product_type || "",
       next.flavor || "",
-      next.recipe_card_type === "Vape" ? "Vape" : next.recipe_card_type === "Distillate/Resin Blend" ? "Distillate/Resin Blend" : "Edible/Topical",
+      ["Vape", "Distillate/Resin Blend", "Resin Blend Calculator"].includes(next.recipe_card_type) ? next.recipe_card_type : "Edible/Topical",
       writableRecipeStatus(next.status),
       next.current_version || "",
       publishedDirty ? 1 : 0,
-      next.batch_size || 0,
+      next.recipe_card_type === "Resin Blend Calculator" ? calculations.total_batch_grams : next.batch_size || 0,
       next.recipe_card_type === "Vape" ? "liters" : next.batch_size_mode === "units" ? "units" : "grams",
       next.recipe_card_type === "Vape" ? "L" : "grams",
       next.unit_weight || 0,
@@ -394,6 +397,7 @@ async function updateRecipe(id, input) {
       next.is_new_recipe_duplicate ? 1 : 0,
       JSON.stringify(calculations.active_additives || next.active_additives || []),
       JSON.stringify(next.notes || []),
+      JSON.stringify(next.resin_blend || {}),
       id
     ]
   );
@@ -451,6 +455,11 @@ async function publishRecipe(id, publishedBy = "Production") {
   }
   const version = recipe.current_version || await nextVersion(id);
   const calculations = calculateRecipe(recipe, recipe.ingredients, await allSettings());
+  if (recipe.recipe_card_type === "Resin Blend Calculator" && !calculations.valid) {
+    const error = new Error(calculations.errors.join(" "));
+    error.statusCode = 400;
+    throw error;
+  }
   await execute(
     `INSERT INTO recipe_versions (
       recipe_id, version_number, published_by, recipe_snapshot_json, ingredient_snapshot_json, step_snapshot_json, calculation_snapshot_json
@@ -692,7 +701,7 @@ async function upsertProductionItems(items = []) {
         updated_at = CURRENT_TIMESTAMP`,
       [
         item.item_name,
-        item.recipe_card_type === "Vape" ? "Vape" : item.recipe_card_type === "Distillate/Resin Blend" ? "Distillate/Resin Blend" : "Edible/Topical",
+        ["Vape", "Distillate/Resin Blend", "Resin Blend Calculator"].includes(item.recipe_card_type) ? item.recipe_card_type : "Edible/Topical",
         item.product_type || "",
         item.flavor || "",
         item.sku || "",

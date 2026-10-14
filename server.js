@@ -69,6 +69,7 @@ function templateExportPayload(recipe) {
       product_type: recipe.product_type,
       flavor: recipe.flavor,
       recipe_card_type: recipe.recipe_card_type,
+      resin_blend: recipe.resin_blend,
       current_version: recipe.current_version,
       batch_size: recipe.batch_size,
       batch_size_mode: recipe.batch_size_mode,

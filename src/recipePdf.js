@@ -40,6 +40,27 @@ function createRecipePdf(version) {
     field("Published date (as stored)", version.published_date);
     field("Published by", version.published_by);
 
+    if (recipe.recipe_card_type === "Resin Blend Calculator") {
+      heading("Resin Blend Calculator - recipe for each jar");
+      field("Number of jars", calculations.jar_count);
+      field("Total oil (grams)", calculations.oil_total_grams);
+      field("Added terpenes (grams)", calculations.added_terpene_grams);
+      field("Final blend (grams)", calculations.total_batch_grams);
+      field("Total grams per jar", calculations.per_jar_grams);
+      field("Estimated final potency %", calculations.estimated_potency_percent);
+      field("Estimated final terpene %", calculations.estimated_terpene_percent);
+      doc.moveDown(0.5).text("Repeat this recipe for every jar. Amounts are divided equally across jars, preserving the full blend's proportions. No processing loss is assumed.");
+      for (const item of calculations.ingredients || []) {
+        heading(item.ingredient_name);
+        field("Grams per jar", item.per_jar_grams);
+        field("Total grams across all jars", item.batch_qty);
+        field("Metrc #", item.metrc_number);
+        field("Input potency %", item.potency_percent);
+        field("Input terpene %", item.terpene_percent);
+      }
+      doc.moveDown(0.5).text("Added terpene percentages refer to the final blend weight. Added lines assume pure terpenes with 0% potency. Total terpene content includes recorded terpenes already in the oils. Missing percentages are not zero; estimates require all oil percentages for that measurement.");
+    }
+
     heading("Quantity and nutrition analysis guide");
     doc.text("Use each ingredient's batch_qty once, with its recorded unit, for the full batch. formula_qty and formula_percent describe the same formula; they are not additional ingredients. Stored numbers are exported without display rounding. Missing data is not zero.", { lineGap: 2 });
     doc.moveDown(0.5).text("Calculation fields ending in _grams are grams; _mg are milligrams. formula_percent, percent_total and yield_loss_percent are fractions (0.05 = 5%). Additive input potency_percent may use the entered percent format; use potency_fraction when present. Additive calculations describe ingredient contributions and must not automatically be added to the ingredient list again; ingredient_index is zero-based.", { lineGap: 2 });

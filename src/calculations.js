@@ -1,3 +1,5 @@
+const ResinBlend = require("../public/resin-blend");
+
 function number(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -164,6 +166,7 @@ function normalizeActiveAdditives(recipe, ingredients = [], estimatedYield = 0, 
 }
 
 function calculateRecipe(recipe, ingredients = [], settings = {}) {
+  if (recipe.recipe_card_type === ResinBlend.TYPE) return ResinBlend.calculate(recipe);
   const additiveLimit = number(settings.additive_percent_limit, 4);
   const formulaTotal = ingredients.reduce((sum, item) => sum + number(item.formula_qty), 0);
   const batchSizeInput = number(recipe.batch_size);

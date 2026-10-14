@@ -88,6 +88,7 @@ function shortDateLabel(dateString) {
 }
 
 function batchInputLabel(recipe) {
+  if (isResinBlendRecipe(recipe)) return `${qty(recipe.batch_size)} grams / ${escapeHtml(recipe.resin_blend?.jar_count ?? "—")} jars`;
   if (isVapeRecipe(recipe)) return `${qty(recipe.batch_size)} L`;
   return recipe.batch_size_mode === "units"
     ? `${qty(recipe.batch_size)} units`
@@ -261,6 +262,7 @@ function normalizeActiveAdditivesForCalculation(recipe, ingredients = [], estima
 }
 
 function calculateClientRecipe(recipe) {
+  if (isResinBlendRecipe(recipe)) return ResinBlend.calculate(recipe);
   const ingredients = recipe.ingredients || [];
   const batchSizeInput = numeric(recipe.batch_size);
   const unitWeight = numeric(recipe.unit_weight);
@@ -890,6 +892,11 @@ function vapeDistillateIngredient(liters = 0) {
 }
 
 function blankRecipe(recipeCardType = "Edible/Topical") {
+  if (recipeCardType === ResinBlend.TYPE) return {
+    ...blankRecipe(), name: "Untitled Resin Blend", recipe_card_type: ResinBlend.TYPE,
+    product_type: "Resin Blend", resin_blend: { jar_count: 1,
+      oils: [{ name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" }], terpenes: [] }
+  };
   const vape = recipeCardType === "Vape";
   const blend = recipeCardType === "Distillate/Resin Blend";
   return {
@@ -936,6 +943,11 @@ async function renderNewRecipeChoice() {
           <button class="primary" data-new-card-type="Vape">Create Vape Card</button>
         </article>
         <article class="recipe-card">
+          <h3>Resin Blend Calculator</h3>
+          <p>Split oils and optional terpene additions evenly across jars. Record potency, terpene percentages, and Metrc numbers.</p>
+          <button data-new-card-type="Resin Blend Calculator" class="primary">New Resin Blend Calculator</button>
+        </article>
+        <article class="recipe-card">
           <h3>distillate/resin Blend</h3>
           <p>Start with an existing distillate/resin blend and calculate how much live resin is needed to reach a lower target distillate percentage.</p>
           <button class="primary" data-new-card-type="Distillate/Resin Blend">Create Blend Card</button>
@@ -955,6 +967,7 @@ async function renderEditor(id, recipe = null, mode = null) {
   state.editorMode = mode || (state.currentRecipe.status === "Published"
     ? "published-view"
     : state.currentRecipe.status === "Template" ? "template-view" : "draft");
+  if (isResinBlendRecipe(state.currentRecipe)) return renderResinBlendEditor();
   syncVapeDistillateIngredient(state.currentRecipe);
   syncDistillateResinBlendIngredients(state.currentRecipe);
   state.currentRecipe.calculations = state.currentRecipe.calculations || calculateClientRecipe(state.currentRecipe);
@@ -1349,6 +1362,7 @@ function renderActiveAdditiveTool(recipe, locked = false) {
 }
 
 function refreshCalculationDisplay(updateRows = false) {
+  if (isResinBlendRecipe()) return updateResinBlendResult();
   if (!state.currentRecipe) return;
   syncVapeDistillateIngredient(state.currentRecipe);
   syncDistillateResinBlendIngredients(state.currentRecipe);
@@ -1633,6 +1647,7 @@ function moveStep(index, delta) {
 }
 
 function collectRecipe() {
+  if (isResinBlendRecipe()) return collectResinBlendRecipe();
   content.querySelectorAll("[name]").forEach((input) => {
     state.currentRecipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
   });
@@ -1776,6 +1791,10 @@ function bindEditor() {
   });
   content.querySelector("#publishRecipe")?.addEventListener("click", async () => {
     const payload = collectRecipe();
+    if (isResinBlendRecipe(payload) && !payload.calculations.valid) {
+      showToast(payload.calculations.errors.join(" "));
+      return;
+    }
     if (!payload.expected_production_date) {
       showToast("Expected production date is required before publishing.");
       return;
@@ -2096,6 +2115,7 @@ async function renderVersionCard(versionId) {
           <p>${new Date(version.published_date).toLocaleString()}</p>
         </div>
       </header>
+      ${isResinBlendRecipe(recipe) ? `<p>Production date: ${escapeHtml(recipe.expected_production_date || "Not recorded")} · Published by: ${escapeHtml(version.published_by || "")}</p>${renderResinBlendResult(recipe, calculations)}` : `
       <section class="grid">
         <div><strong>Product / Flavor</strong><p>${recipe.product_type || ""} ${recipe.flavor || ""}</p></div>
         <div><strong>Batch size input</strong><p>${batchInputLabel(recipe)}</p></div>
@@ -2124,6 +2144,7 @@ async function renderVersionCard(versionId) {
         </table>
       ` : ""}
       ${(calculations.warnings || []).map((warning) => `<div class="warning">${warning}</div>`).join("")}
+      `}
       <h2>SOP / Process Instructions</h2>
       <ol>${version.steps.map((step) => `<li>${step.instruction_text}</li>`).join("")}</ol>
       <h2>Notes</h2>
@@ -2346,6 +2367,7 @@ async function renderProductionItems() {
               <option>Edible/Topical</option>
               <option>Vape</option>
               <option>Distillate/Resin Blend</option>
+              <option>Resin Blend Calculator</option>
             </select>
           </label>
           <label>Product type

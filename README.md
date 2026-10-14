@@ -36,6 +36,18 @@ http://localhost:3000
 - Printable browser recipe card.
 - Starter seed data for one topical stick rub and one gummy formula.
 
+## Resin Blend Calculator
+
+Choose **New Recipe → Resin Blend Calculator**. Enter each oil's total grams and the number of jars. Potency %, terpene %, and Metrc numbers are optional for each oil. Percentages use 0–100, including values below 1 (0.5 means 0.5%).
+
+Add any number of terpene lines, each specified as a percentage of final blend weight. If the starting oils weigh `O` grams and added terpene fractions total `T`, final mass is `O / (1 - T)`. Each line's grams are divided by the number of jars, preserving the same blend in every jar. Added lines assume pure terpenes with no potency. No processing loss is deducted.
+
+Potency and total terpene content are weighted by mass. An estimate requires the corresponding percentage for every oil; blank values remain unknown, while explicit zero is valid. Added terpene percentages do not include terpenes already present in the oils.
+
+Use **Print Jar Recipe** for the identical recipe to repeat in every jar. Save drafts, lock/unlock the formula, publish snapshots, and export/import templates as usual. Published cards and PDFs preserve the original inputs and per-jar amounts.
+
+Run calculation and isolated database tests with `npm test`.
+
 ## Import Flow
 
 1. Open Import.
