@@ -895,7 +895,7 @@ function blankRecipe(recipeCardType = "Edible/Topical") {
   if (recipeCardType === ResinBlend.TYPE) return {
     ...blankRecipe(), name: "Untitled Resin Blend", recipe_card_type: ResinBlend.TYPE,
     product_type: "Resin Blend", resin_blend: { jar_count: 1,
-      oils: [{ name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" }], terpenes: [] }
+      oils: ["distillate", "resin"].map((kind) => ({ kind, name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" })), terpenes: [] }
   };
   const vape = recipeCardType === "Vape";
   const blend = recipeCardType === "Distillate/Resin Blend";
@@ -944,13 +944,8 @@ async function renderNewRecipeChoice() {
         </article>
         <article class="recipe-card">
           <h3>Resin Blend Calculator</h3>
-          <p>Split oils and optional terpene additions evenly across jars. Record potency, terpene percentages, and Metrc numbers.</p>
+          <p>Add multiple distillates and resins, enter the mix vessels used, and calculate an identical recipe for each jar. Record potency, terpene percentages, and Metrc numbers.</p>
           <button data-new-card-type="Resin Blend Calculator" class="primary">New Resin Blend Calculator</button>
-        </article>
-        <article class="recipe-card">
-          <h3>distillate/resin Blend</h3>
-          <p>Start with an existing distillate/resin blend and calculate how much live resin is needed to reach a lower target distillate percentage.</p>
-          <button class="primary" data-new-card-type="Distillate/Resin Blend">Create Blend Card</button>
         </article>
       </div>
     </section>
@@ -988,6 +983,7 @@ async function renderEditor(id, recipe = null, mode = null) {
   const headerLocked = readOnlyRecipe;
   setPage(r.name, readOnlyRecipe ? `${templateRecipe ? "Template" : "Published recipe"} is read-only. Select Edit to make changes.` : "Make all needed recipe changes, then apply them to update the calculated quantities.");
   content.innerHTML = `
+    ${blendRecipe ? '<section class="section no-print"><h2>Mixing distillates and resins across jars?</h2><p>Use the Resin Blend Calculator to enter each distillate and resin separately and divide them evenly among mix vessels. This older card calculates resin additions to an existing blend.</p><button id="startPerJarBlend" class="primary">Start Per-Jar Resin Blend Calculator</button><p class="helper">Copies recipe details into a new draft. Enter the individual distillate and resin amounts there.</p></section>' : ""}
     <section class="section">
       <div class="section-header">
         <div>${statusBadge(r)}</div>
@@ -1683,6 +1679,15 @@ function collectRecipe() {
 
 function bindEditor() {
   bindActiveAdditiveTool();
+
+  content.querySelector("#startPerJarBlend")?.addEventListener("click", () => {
+    const source = collectRecipe();
+    const recipe = { ...blankRecipe(ResinBlend.TYPE), name: source.name,
+      product_type: source.product_type, flavor: source.flavor,
+      expected_production_date: source.expected_production_date,
+      notes: [...(source.notes || [])], steps: (source.steps || []).map((step) => ({ instruction_text: step.instruction_text })) };
+    renderEditor(null, recipe, "draft");
+  });
 
   content.querySelector("#toggleFormulaLock")?.addEventListener("click", async () => {
     const readOnly = state.editorMode === "published-view" || state.editorMode === "template-view";

@@ -15,8 +15,8 @@ test('blend inputs survive saving, duplication, and publication without altering
   await db.migrate();
   await db.migrate(); // Migration must remain safe on an existing database.
   const resin_blend = { jar_count: 4, oils: [
-    { name: 'Oil A', grams: 600, potency_percent: 80, terpene_percent: 2, metrc_number: '000123' },
-    { name: 'Oil B', grams: 350, potency_percent: 60, terpene_percent: '' }
+    { kind: 'distillate', name: 'Oil A', grams: 600, potency_percent: 80, terpene_percent: 2, metrc_number: '000123' },
+    { kind: 'resin', name: 'Oil B', grams: 350, potency_percent: 60, terpene_percent: '' }
   ], terpenes: [{ name: 'Terp A', percent: 3, metrc_number: '000456' }, { name: 'Terp B', percent: 2 }] };
   const saved = await db.createRecipe({ name: 'Blend', recipe_card_type: 'Resin Blend Calculator', resin_blend,
     expected_production_date: '2026-10-20', steps: [{ instruction_text: 'Blend each jar.' }] });
@@ -34,6 +34,8 @@ test('blend inputs survive saving, duplication, and publication without altering
   assert.equal(historical.calculations.jar_count, 4);
   assert.equal(historical.calculations.per_jar_grams, 250);
   assert.equal(historical.ingredients[0].metrc_number, '000123');
+  assert.equal(historical.ingredients[0].blend_kind, 'Distillate');
+  assert.equal(historical.ingredients[1].blend_kind, 'Resin');
   assert.equal(historical.ingredients[2].metrc_number, '000456');
   const duplicate = await db.duplicateRecipe(saved.id);
   assert.deepEqual(duplicate.resin_blend, modified.resin_blend);

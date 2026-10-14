@@ -83,3 +83,21 @@ test('browser and server use identical calculations without changing existing re
   assert.equal(existing.ingredients[0].batch_qty, 100);
   assert.equal(existing.yield_loss_percent, 0.05);
 });
+
+
+test('multiple distillates and resins keep their labels and identical proportions in every vessel', () => {
+  const r = recipe();
+  r.resin_blend.jar_count = 5;
+  r.resin_blend.oils = [
+    {kind:'distillate',name:'Distillate A',grams:600},
+    {kind:'distillate',name:'Distillate B',grams:300},
+    {kind:'resin',name:'Resin A',grams:450},
+    {kind:'resin',name:'Resin B',grams:150}
+  ];
+  const c = ResinBlend.calculate(r);
+  assert.equal(c.valid,true);
+  assert.deepEqual(c.ingredients.map(row=>row.blend_kind),['Distillate','Distillate','Resin','Resin']);
+  assert.deepEqual(c.ingredients.map(row=>row.per_jar_grams),[120,60,90,30]);
+  close(c.per_jar_grams,300);
+  for (const row of c.ingredients) close(row.per_jar_grams/c.per_jar_grams,row.batch_qty/c.total_batch_grams);
+});

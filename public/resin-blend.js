@@ -37,7 +37,7 @@
     const terpenesKnown = oils.length > 0 && oils.every((oil) => percentValid(oil.terpene_percent));
     const weighted = (key) => oils.reduce((sum, oil) => sum + Number(oil.grams) * Number(oil[key]) / 100, 0);
     const ingredients = valid ? [
-      ...oils.map((oil) => ({ ingredient_name: oil.name.trim(), blend_kind: "Oil", batch_qty: Number(oil.grams),
+      ...oils.map((oil) => ({ ingredient_name: oil.name.trim(), blend_kind: oil.kind === "distillate" ? "Distillate" : oil.kind === "resin" ? "Resin" : "Oil", batch_qty: Number(oil.grams),
         potency_percent: present(oil.potency_percent) ? Number(oil.potency_percent) : null,
         terpene_percent: present(oil.terpene_percent) ? Number(oil.terpene_percent) : null, metrc_number: String(oil.metrc_number || "") })),
       ...terpenes.map((row) => ({ ingredient_name: row.name.trim(), blend_kind: "Added terpene", batch_qty: finalTotal * Number(row.percent) / 100,

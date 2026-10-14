@@ -20,7 +20,7 @@ function renderResinBlendResult(recipe, calculations = recipe.calculations) {
       <div class="metric"><strong>Total oil</strong><p>${blendAmount(c.oil_total_grams)} g</p></div>
       <div class="metric"><strong>Added terpenes</strong><p>${blendAmount(c.added_terpene_grams)} g (${blendPercent(c.added_terpene_percent)} of final blend)</p></div>
       <div class="metric"><strong>Final blend total</strong><p>${blendAmount(c.total_batch_grams)} g</p></div>
-      <div class="metric"><strong>Jars</strong><p>${c.jar_count}</p></div>
+      <div class="metric"><strong>Mix vessels used</strong><p>${c.jar_count}</p></div>
       <div class="metric"><strong>Total in each jar</strong><p>${blendAmount(c.per_jar_grams)} g</p></div>
       <div class="metric"><strong>Estimated final potency</strong><p>${blendPercent(c.estimated_potency_percent)}</p></div>
       <div class="metric"><strong>Estimated final terpene content</strong><p>${blendPercent(c.estimated_terpene_percent)}</p></div>
@@ -28,8 +28,8 @@ function renderResinBlendResult(recipe, calculations = recipe.calculations) {
     <h3>Recipe for each jar · repeat for jars 1–${c.jar_count}</h3>
     <p>Weigh the “Grams per jar” amount of every line into each jar. Each jar has the same proportions as the full blend.</p>
     <div class="table-wrap"><table class="resin-blend-output">
-      <thead><tr><th>Oil / terpene</th><th>Metrc #</th><th>Input potency %</th><th>Input terpene %</th><th>Total grams (all jars)</th><th>Blend share</th><th>Grams per jar</th></tr></thead>
-      <tbody>${c.ingredients.map((row) => `<tr><td data-mobile-label="Oil / terpene">${escapeHtml(row.ingredient_name)}<span class="helper">${escapeHtml(row.blend_kind)}</span></td><td data-mobile-label="Metrc #">${escapeHtml(row.metrc_number || "Not recorded")}</td><td data-mobile-label="Input potency %">${blendPercent(row.potency_percent)}</td><td data-mobile-label="Input terpene %">${blendPercent(row.terpene_percent)}</td><td data-mobile-label="Total grams (all jars)">${blendAmount(row.batch_qty)}</td><td data-mobile-label="Blend share">${blendPercent(row.formula_percent * 100)}</td><td data-mobile-label="Grams per jar" class="batch-qty-display">${blendAmount(row.per_jar_grams)}</td></tr>`).join("")}</tbody>
+      <thead><tr><th>Distillate / resin / terpene</th><th>Metrc #</th><th>Input potency %</th><th>Input terpene %</th><th>Total grams (all jars)</th><th>Blend share</th><th>Grams per jar</th></tr></thead>
+      <tbody>${c.ingredients.map((row) => `<tr><td data-mobile-label="Distillate / resin / terpene">${escapeHtml(row.ingredient_name)}<span class="helper">${escapeHtml(row.blend_kind)}</span></td><td data-mobile-label="Metrc #">${escapeHtml(row.metrc_number || "Not recorded")}</td><td data-mobile-label="Input potency %">${blendPercent(row.potency_percent)}</td><td data-mobile-label="Input terpene %">${blendPercent(row.terpene_percent)}</td><td data-mobile-label="Total grams (all jars)">${blendAmount(row.batch_qty)}</td><td data-mobile-label="Blend share">${blendPercent(row.formula_percent * 100)}</td><td data-mobile-label="Grams per jar" class="batch-qty-display">${blendAmount(row.per_jar_grams)}</td></tr>`).join("")}</tbody>
       <tfoot><tr><th colspan="4">Total</th><th>${blendAmount(c.total_batch_grams)} g</th><th>100%</th><th>${blendAmount(c.per_jar_grams)} g</th></tr></tfoot>
     </table></div>
     ${c.estimated_potency_percent === null ? '<p class="helper">Enter potency % for every oil to estimate the final potency. Blank values are unknown; enter 0 for a known zero.</p>' : ""}
@@ -74,8 +74,18 @@ function renderResinBlendEditor() {
   const locked = readOnly || Boolean(r.copy_lock_formula);
   const published = r.status === "Published";
   const template = r.status === "Template";
-  setPage(r.name, "Divide each oil evenly among jars. Optional terpene additions are percentages of the final blend.");
+  setPage(r.name, "Enter distillates and resins, then choose how many jars to mix. Optional terpene additions are percentages of the final blend.");
   const input = (group, index, key, value, type = "text", optional = false) => `<input aria-label="${group === "oils" ? "Oil" : "Terpene"} ${index + 1} ${key.replaceAll("_", " ")}" data-blend-group="${group}" data-blend-index="${index}" data-blend-field="${key}" type="${type}" ${type === "number" ? `min="0" step="any" ${key.includes("percent") ? 'max="100"' : ""}` : ""} value="${escapeHtml(value ?? "")}" ${optional ? 'placeholder="Optional"' : ""} ${locked ? "readonly" : ""}>`;
+  const oilSection = (kind, heading, addLabel) => {
+    const rows = r.resin_blend.oils.map((oil, index) => ({ oil, index })).filter(({ oil }) => kind ? oil.kind === kind : !["distillate", "resin"].includes(oil.kind));
+    return `<section class="section no-print" data-oil-section="${kind || "unclassified"}">
+      <div class="section-header"><h2>${heading}</h2>${locked || !kind ? "" : `<button data-add-blend-oil="${kind}">${addLabel}</button>`}</div>
+      <p>Enter the total grams of each ${kind || "oil"} to use across all jars. Potency %, terpene %, and Metrc # are optional.</p>
+      <div class="table-wrap"><table class="resin-blend-input"><thead><tr><th>Name</th><th>Total grams to add</th><th>Potency % (optional)</th><th>Terpene % (optional)</th><th>Metrc # (optional)</th><th>Type</th><th></th></tr></thead><tbody>
+      ${rows.map(({ oil, index: i }) => `<tr><td data-mobile-label="Name">${input("oils", i, "name", oil.name)}</td><td data-mobile-label="Total grams to add">${input("oils", i, "grams", oil.grams, "number")}</td><td data-mobile-label="Potency % (optional)">${input("oils", i, "potency_percent", oil.potency_percent, "number", true)}</td><td data-mobile-label="Terpene % (optional)">${input("oils", i, "terpene_percent", oil.terpene_percent, "number", true)}</td><td data-mobile-label="Metrc # (optional)">${input("oils", i, "metrc_number", oil.metrc_number, "text", true)}</td><td data-mobile-label="Type"><select aria-label="Oil ${i + 1} type" data-oil-kind="${i}" ${locked ? "disabled" : ""}><option value="" ${!oil.kind ? "selected" : ""}>Select type</option><option value="distillate" ${oil.kind === "distillate" ? "selected" : ""}>Distillate</option><option value="resin" ${oil.kind === "resin" ? "selected" : ""}>Resin</option></select></td><td>${locked ? "" : `<button class="danger" data-blend-remove="oils" data-index="${i}">Remove</button>`}</td></tr>`).join("") || `<tr><td colspan="7">No ${kind === "distillate" ? "distillates" : "resins"} added. Use ${addLabel} to add one or more.</td></tr>`}
+      </tbody></table></div>
+    </section>`;
+  };
   content.innerHTML = `<div class="resin-blend-editor">
     <section class="section no-print">
       <div class="section-header"><div>${statusBadge(r)}<p>Resin Blend Calculator</p></div><div class="toolbar">
@@ -93,16 +103,16 @@ function renderResinBlendEditor() {
         ${field("flavor", "Flavor", r.flavor, "", "text", readOnly)}
         ${field("current_version", "Version to publish", r.current_version, "", "text", readOnly)}
         ${field("expected_production_date", "Production date", r.expected_production_date, "Required to publish.", "date", readOnly)}
-        <label>Number of jars<input id="blendJarCount" type="number" min="1" step="1" value="${escapeHtml(r.resin_blend.jar_count ?? "")}" ${locked ? "readonly" : ""}></label>
       </div>
       ${locked ? '<p class="warning">Formula locked. Select Unlock Formula to change oils, jars, or added terpenes.</p>' : ""}
     </section>
+    ${oilSection("distillate", "Distillate to add", "Add Distillate")}
+    ${oilSection("resin", "Resin to add", "Add Resin")}
+    ${r.resin_blend.oils.some((oil) => !["distillate", "resin"].includes(oil.kind)) ? oilSection("", "Previously saved oils — select distillate or resin", "") : ""}
     <section class="section no-print">
-      <div class="section-header"><h2>Oils to blend</h2>${locked ? "" : '<button id="addBlendOil">Add Oil</button>'}</div>
-      <p>Enter the full amount available for each oil in grams. Optional percentages use 0–100: enter 0.5 for 0.5%.</p>
-      <div class="table-wrap"><table class="resin-blend-input"><thead><tr><th>Oil name</th><th>Total grams</th><th>Potency % (optional)</th><th>Terpene % (optional)</th><th>Metrc # (optional)</th><th></th></tr></thead><tbody>
-      ${r.resin_blend.oils.map((oil, i) => `<tr><td data-mobile-label="Oil name">${input("oils", i, "name", oil.name)}</td><td data-mobile-label="Total grams">${input("oils", i, "grams", oil.grams, "number")}</td><td data-mobile-label="Potency % (optional)">${input("oils", i, "potency_percent", oil.potency_percent, "number", true)}</td><td data-mobile-label="Terpene % (optional)">${input("oils", i, "terpene_percent", oil.terpene_percent, "number", true)}</td><td data-mobile-label="Metrc # (optional)">${input("oils", i, "metrc_number", oil.metrc_number, "text", true)}</td><td>${locked ? "" : `<button class="danger" data-blend-remove="oils" data-index="${i}">Remove</button>`}</td></tr>`).join("")}
-      </tbody></table></div>
+      <h2>Mix vessels used</h2>
+      <p>How many jars are you mixing? Each jar will receive an equal share of every distillate, resin, and added terpene.</p>
+      <label>Number of jars<input id="blendJarCount" type="number" min="1" step="1" value="${escapeHtml(r.resin_blend.jar_count ?? "")}" ${locked ? "readonly" : ""}></label>
     </section>
     <section class="section no-print">
       <div class="section-header"><h2>Added terpenes (optional)</h2>${locked ? "" : '<button id="addBlendTerpene">Add Terpene</button>'}</div>
@@ -131,10 +141,15 @@ function renderResinBlendEditor() {
     updateResinBlendResult();
   });
   const rerender = () => { collectResinBlendRecipe(); renderResinBlendEditor(); };
-  content.querySelector("#addBlendOil")?.addEventListener("click", () => {
-    r.resin_blend.oils.push({ name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" });
+  content.querySelectorAll("[data-add-blend-oil]").forEach((button) => button.addEventListener("click", () => {
+    r.resin_blend.oils.push({ kind: button.dataset.addBlendOil, name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" });
     rerender();
-  });
+  }));
+  content.querySelectorAll("[data-oil-kind]").forEach((select) => select.addEventListener("change", () => {
+    if (locked) return;
+    r.resin_blend.oils[Number(select.dataset.oilKind)].kind = select.value;
+    rerender();
+  }));
   content.querySelector("#addBlendTerpene")?.addEventListener("click", () => {
     r.resin_blend.terpenes.push({ name: "", percent: "", metrc_number: "" });
     rerender();

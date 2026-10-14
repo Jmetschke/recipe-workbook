@@ -38,7 +38,7 @@ http://localhost:3000
 
 ## Resin Blend Calculator
 
-Choose **New Recipe → Resin Blend Calculator**. Enter each oil's total grams and the number of jars. Potency %, terpene %, and Metrc numbers are optional for each oil. Percentages use 0–100, including values below 1 (0.5 means 0.5%).
+Choose **New Recipe → Resin Blend Calculator**. Use **Distillate to add** and **Resin to add** for one or more entries of each type, then enter the jar count under **Mix vessels used**. Each line records its total grams across all jars. Potency %, terpene %, and Metrc numbers are optional for each oil. Percentages use 0–100, including values below 1 (0.5 means 0.5%).
 
 Add any number of terpene lines, each specified as a percentage of final blend weight. If the starting oils weigh `O` grams and added terpene fractions total `T`, final mass is `O / (1 - T)`. Each line's grams are divided by the number of jars, preserving the same blend in every jar. Added lines assume pure terpenes with no potency. No processing loss is deducted.
 
