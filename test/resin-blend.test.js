@@ -101,3 +101,53 @@ test('multiple distillates and resins keep their labels and identical proportion
   close(c.per_jar_grams,300);
   for (const row of c.ingredients) close(row.per_jar_grams/c.per_jar_grams,row.batch_qty/c.total_batch_grams);
 });
+
+
+test('target total terpene content accounts for existing terpenes and divides additions by blend share and jars', () => {
+  const r = recipe();
+  Object.assign(r.resin_blend, {terpene_mode:'target',target_terpene_percent:7.6,terpenes:[{name:'Terp A',percent:60},{name:'Terp B',percent:40}]});
+  const c = ResinBlend.calculate(r);
+  assert.equal(c.valid,true);
+  close(c.existing_terpene_grams,26);
+  close(c.required_terpene_grams,50);
+  close(c.required_terpene_per_jar_grams,12.5);
+  close(c.ingredients[2].batch_qty,30);
+  close(c.ingredients[3].batch_qty,20);
+  close(c.ingredients[2].per_jar_grams,7.5);
+  close(c.estimated_terpene_percent,7.6);
+  close(c.estimated_potency_percent,69);
+  close((c.existing_terpene_grams+c.added_terpene_grams)/c.total_batch_grams*100,7.6);
+  assert.deepEqual(c,calculateRecipe(r));
+});
+
+test('target calculator shows needed grams before terpene allocation, then enforces shares totaling 100%', () => {
+  const r = recipe();
+  Object.assign(r.resin_blend,{terpene_mode:'target',target_terpene_percent:7.6});
+  let c = ResinBlend.calculate(r);
+  assert.equal(c.valid,false);close(c.required_terpene_grams,50);
+  r.resin_blend.terpenes=[{name:'A',percent:50}];
+  c=ResinBlend.calculate(r);assert.equal(c.valid,false);close(c.required_terpene_grams,50);
+  r.resin_blend.terpenes[0].percent=100;
+  c=ResinBlend.calculate(r);assert.equal(c.valid,true);close(c.ingredients[2].batch_qty,50);
+});
+
+test('target mode rejects impossible targets and unknown starting content, with explicit zero and no-addition support', () => {
+  const r=recipe();r.resin_blend.terpene_mode='target';
+  for(const target of [-1,100,101,'bad',1]) {
+    r.resin_blend.target_terpene_percent=target;
+    const c=ResinBlend.calculate(r);assert.equal(c.valid,false);assert.equal(c.required_terpene_grams,null);
+  }
+  r.resin_blend.target_terpene_percent=26/950*100;
+  let c=ResinBlend.calculate(r);assert.equal(c.valid,true);close(c.required_terpene_grams,0);
+  r.resin_blend.target_terpene_percent=7.6;
+  r.resin_blend.oils[0].terpene_percent='';
+  c=ResinBlend.calculate(r);assert.equal(c.valid,false);assert.equal(c.required_terpene_grams,null);
+  r.resin_blend.target_terpene_percent='';
+  assert.equal(ResinBlend.calculate(r).valid,true);
+  r.resin_blend.target_terpene_percent=0;
+  r.resin_blend.oils.forEach(o=>o.terpene_percent=0);
+  c=ResinBlend.calculate(r);assert.equal(c.valid,true);close(c.required_terpene_grams,0);
+  r.resin_blend.target_terpene_percent=0.5;
+  r.resin_blend.terpenes=[{name:'Terp',percent:100}];
+  c=ResinBlend.calculate(r);assert.equal(c.valid,true);close(c.estimated_terpene_percent,0.5);
+});

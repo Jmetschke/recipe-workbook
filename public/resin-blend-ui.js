@@ -23,6 +23,7 @@ function renderResinBlendResult(recipe, calculations = recipe.calculations) {
       <div class="metric"><strong>Mix vessels used</strong><p>${c.jar_count}</p></div>
       <div class="metric"><strong>Total in each jar</strong><p>${blendAmount(c.per_jar_grams)} g</p></div>
       <div class="metric"><strong>Estimated final potency</strong><p>${blendPercent(c.estimated_potency_percent)}</p></div>
+      ${c.terpene_mode === "target" && c.target_terpene_percent !== null ? `<div class="metric"><strong>Target total terpene content</strong><p>${blendPercent(c.target_terpene_percent)}</p></div>` : ""}
       <div class="metric"><strong>Estimated final terpene content</strong><p>${blendPercent(c.estimated_terpene_percent)}</p></div>
     </div>
     <h3>Recipe for each jar · repeat for jars 1–${c.jar_count}</h3>
@@ -34,8 +35,17 @@ function renderResinBlendResult(recipe, calculations = recipe.calculations) {
     </table></div>
     ${c.estimated_potency_percent === null ? '<p class="helper">Enter potency % for every oil to estimate the final potency. Blank values are unknown; enter 0 for a known zero.</p>' : ""}
     ${c.estimated_terpene_percent === null ? '<p class="helper">Enter terpene % for every oil to estimate total terpene content, including the terpenes already in the oils.</p>' : ""}
-    <p class="helper">Added terpene lines are treated as pure terpenes with 0% potency. Their percentages are additions, not a target for total terpene content. Potency and terpene estimates are weighted by mass and are the same in every jar. No processing loss is assumed. Displayed grams are rounded to six decimal places; calculations retain full precision.</p>
+    <p class="helper">Added terpene lines are treated as pure terpenes with 0% potency. ${c.terpene_mode === "target" ? "The target includes terpenes already in the oils. Terpene line shares divide only the required addition." : "Recorded line percentages are additions as a share of the final blend."} Potency and terpene estimates are weighted by mass and are the same in every jar. No processing loss is assumed. Displayed grams are rounded to six decimal places; calculations retain full precision.</p>
   </section>`;
+}
+
+function renderBlendTerpeneSummary(c) {
+  return `<div class="grid" id="blendTerpeneSummary">
+    <div class="metric"><strong>Terpenes already in oils</strong><p>${blendPercent(c.starting_terpene_percent)} · ${blendAmount(c.existing_terpene_grams)} g</p></div>
+    <div class="metric"><strong>Target total terpene content</strong><p>${blendPercent(c.target_terpene_percent)}</p></div>
+    <div class="metric"><strong>Total terpenes to add</strong><p>${blendAmount(c.required_terpene_grams)} g</p></div>
+    <div class="metric"><strong>Terpenes to add per jar</strong><p>${blendAmount(c.required_terpene_per_jar_grams)} g</p></div>
+  </div>`;
 }
 
 function updateResinBlendResult() {
@@ -45,6 +55,16 @@ function updateResinBlendResult() {
   recipe.batch_size = recipe.calculations.total_batch_grams;
   const result = content.querySelector("#resinBlendResult");
   if (result) result.outerHTML = renderResinBlendResult(recipe);
+  const summary = content.querySelector("#blendTerpeneSummary");
+  if (summary) summary.outerHTML = renderBlendTerpeneSummary(recipe.calculations);
+  content.querySelectorAll("[data-terpene-grams]").forEach((cell) => {
+    const row = recipe.resin_blend.terpenes[Number(cell.dataset.terpeneGrams)];
+    if (!row) { cell.textContent = "—"; return; }
+    const share = Number(row.percent);
+    const total = recipe.calculations.required_terpene_grams;
+    const grams = total !== null && Number.isFinite(share) && share >= 0 && share <= 100 ? total * share / 100 : null;
+    cell.textContent = `${blendAmount(cell.dataset.perJar === "true" && grams !== null ? grams / Number(recipe.resin_blend.jar_count) : grams)} g`;
+  });
   const print = content.querySelector("#printBlendRecipe");
   if (print) print.disabled = !recipe.calculations.valid;
 }
@@ -68,13 +88,15 @@ function renderResinBlendEditor() {
   r.resin_blend ||= { jar_count: 1, oils: [], terpenes: [] };
   r.resin_blend.oils ||= [];
   r.resin_blend.terpenes ||= [];
+  if (!r.resin_blend.terpene_mode && !r.resin_blend.terpenes.length) r.resin_blend.terpene_mode = "target";
+  const targetMode = r.resin_blend.terpene_mode === "target";
   r.steps ||= [];
   r.calculations = ResinBlend.calculate(r);
   const readOnly = ["published-view", "template-view"].includes(state.editorMode);
   const locked = readOnly || Boolean(r.copy_lock_formula);
   const published = r.status === "Published";
   const template = r.status === "Template";
-  setPage(r.name, "Enter distillates and resins, then choose how many jars to mix. Optional terpene additions are percentages of the final blend.");
+  setPage(r.name, "Enter distillates and resins, then choose how many jars to mix. Set a target for the total terpene content of the finished mix.");
   const input = (group, index, key, value, type = "text", optional = false) => `<input aria-label="${group === "oils" ? "Oil" : "Terpene"} ${index + 1} ${key.replaceAll("_", " ")}" data-blend-group="${group}" data-blend-index="${index}" data-blend-field="${key}" type="${type}" ${type === "number" ? `min="0" step="any" ${key.includes("percent") ? 'max="100"' : ""}` : ""} value="${escapeHtml(value ?? "")}" ${optional ? 'placeholder="Optional"' : ""} ${locked ? "readonly" : ""}>`;
   const oilSection = (kind, heading, addLabel) => {
     const rows = r.resin_blend.oils.map((oil, index) => ({ oil, index })).filter(({ oil }) => kind ? oil.kind === kind : !["distillate", "resin"].includes(oil.kind));
@@ -115,10 +137,13 @@ function renderResinBlendEditor() {
       <label>Number of jars<input id="blendJarCount" type="number" min="1" step="1" value="${escapeHtml(r.resin_blend.jar_count ?? "")}" ${locked ? "readonly" : ""}></label>
     </section>
     <section class="section no-print">
-      <div class="section-header"><h2>Added terpenes (optional)</h2>${locked ? "" : '<button id="addBlendTerpene">Add Terpene</button>'}</div>
-      <p>Each line is its percentage of the final blend weight. All added lines together must total less than 100%. For example, 950 g oil plus a 5% terpene line needs 50 g terpenes. Added lines assume pure terpenes with 0% potency.</p>
-      <div class="table-wrap"><table class="resin-blend-input"><thead><tr><th>Terpene name</th><th>% of final blend</th><th>Metrc # (optional)</th><th></th></tr></thead><tbody>
-      ${r.resin_blend.terpenes.map((row, i) => `<tr><td data-mobile-label="Terpene name">${input("terpenes", i, "name", row.name)}</td><td data-mobile-label="% of final blend">${input("terpenes", i, "percent", row.percent, "number")}</td><td data-mobile-label="Metrc # (optional)">${input("terpenes", i, "metrc_number", row.metrc_number, "text", true)}</td><td>${locked ? "" : `<button class="danger" data-blend-remove="terpenes" data-index="${i}">Remove</button>`}</td></tr>`).join("") || '<tr><td colspan="4">No added terpenes. Add lines when needed.</td></tr>'}
+      <div class="section-header"><h2>Terpene Calculator</h2>${locked ? "" : '<button id="addBlendTerpene">Add Terpene</button>'}</div>
+      ${targetMode ? `<label>Target total terpene % (optional)<input id="blendTargetTerpene" type="number" min="0" max="99.999999" step="any" placeholder="e.g. 7" value="${escapeHtml(r.resin_blend.target_terpene_percent ?? "")}" ${locked ? "readonly" : ""}></label>
+      <p>This is the total terpene content you want in the finished mix, including terpenes already in every distillate and resin. Enter each oil’s terpene % above (0 for a known zero). Leave the target blank when no addition is needed.</p>
+      ${renderBlendTerpeneSummary(r.calculations)}
+      <p>Split the calculated addition among the terpene lines below. Their shares must total 100%. For one terpene, enter 100%. Added lines assume pure terpenes with 0% potency.</p>` : `<p>This saved recipe uses recorded additions as percentages of final blend weight.</p>${locked ? "" : '<button id="useTerpeneTarget">Use Target Total Terpene %</button>'}`}
+      <div class="table-wrap"><table class="resin-blend-input"><thead><tr><th>Terpene name</th><th>${targetMode ? "% of terpene blend" : "% of final blend"}</th><th>Metrc # (optional)</th>${targetMode ? '<th>Grams to add (all jars)</th><th>Grams to add per jar</th>' : ""}<th></th></tr></thead><tbody>
+      ${r.resin_blend.terpenes.map((row, i) => `<tr><td data-mobile-label="Terpene name">${input("terpenes", i, "name", row.name)}</td><td data-mobile-label="${targetMode ? "% of terpene blend" : "% of final blend"}">${input("terpenes", i, "percent", row.percent, "number")}</td><td data-mobile-label="Metrc # (optional)">${input("terpenes", i, "metrc_number", row.metrc_number, "text", true)}</td>${targetMode ? `<td data-mobile-label="Grams to add (all jars)" data-terpene-grams="${i}"></td><td data-mobile-label="Grams to add per jar" data-terpene-grams="${i}" data-per-jar="true"></td>` : ""}<td>${locked ? "" : `<button class="danger" data-blend-remove="terpenes" data-index="${i}">Remove</button>`}</td></tr>`).join("") || `<tr><td colspan="${targetMode ? 6 : 4}">No added terpenes. Add lines when needed.</td></tr>`}
       </tbody></table></div>
     </section>
     <div class="toolbar no-print"><button id="printBlendRecipe" ${r.calculations.valid ? "" : "disabled"}>Print Jar Recipe</button><span class="helper">Quantities update as you type. Save Changes to keep your edits.</span></div>
@@ -140,7 +165,20 @@ function renderResinBlendEditor() {
     r.resin_blend.jar_count = event.target.value;
     updateResinBlendResult();
   });
+  content.querySelector("#blendTargetTerpene")?.addEventListener("input", (event) => {
+    if (locked) return;
+    r.resin_blend.target_terpene_percent = event.target.value;
+    updateResinBlendResult();
+  });
   const rerender = () => { collectResinBlendRecipe(); renderResinBlendEditor(); };
+  content.querySelector("#useTerpeneTarget")?.addEventListener("click", () => {
+    const previous = ResinBlend.calculate(r);
+    const sum = r.resin_blend.terpenes.reduce((total, row) => total + Number(row.percent || 0), 0);
+    r.resin_blend.target_terpene_percent = previous.estimated_terpene_percent ?? "";
+    r.resin_blend.terpenes.forEach((row) => { row.percent = sum > 0 ? Number(row.percent || 0) / sum * 100 : ""; });
+    r.resin_blend.terpene_mode = "target";
+    rerender();
+  });
   content.querySelectorAll("[data-add-blend-oil]").forEach((button) => button.addEventListener("click", () => {
     r.resin_blend.oils.push({ kind: button.dataset.addBlendOil, name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" });
     rerender();
@@ -151,13 +189,14 @@ function renderResinBlendEditor() {
     rerender();
   }));
   content.querySelector("#addBlendTerpene")?.addEventListener("click", () => {
-    r.resin_blend.terpenes.push({ name: "", percent: "", metrc_number: "" });
+    r.resin_blend.terpenes.push({ name: "", percent: targetMode && !r.resin_blend.terpenes.length ? 100 : "", metrc_number: "" });
     rerender();
   });
   content.querySelectorAll("[data-blend-remove]").forEach((button) => button.addEventListener("click", () => {
     r.resin_blend[button.dataset.blendRemove].splice(Number(button.dataset.index), 1);
     rerender();
   }));
+  updateResinBlendResult();
   content.querySelector("#printBlendRecipe").addEventListener("click", () => {
     collectResinBlendRecipe();
     if (!r.calculations.valid) return;

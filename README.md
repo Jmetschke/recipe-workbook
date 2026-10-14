@@ -40,9 +40,13 @@ http://localhost:3000
 
 Choose **New Recipe → Resin Blend Calculator**. Use **Distillate to add** and **Resin to add** for one or more entries of each type, then enter the jar count under **Mix vessels used**. Each line records its total grams across all jars. Potency %, terpene %, and Metrc numbers are optional for each oil. Percentages use 0–100, including values below 1 (0.5 means 0.5%).
 
-Add any number of terpene lines, each specified as a percentage of final blend weight. If the starting oils weigh `O` grams and added terpene fractions total `T`, final mass is `O / (1 - T)`. Each line's grams are divided by the number of jars, preserving the same blend in every jar. Added lines assume pure terpenes with no potency. No processing loss is deducted.
+Set **Target total terpene %** to the desired terpene content of the finished mix, including terpenes already in the distillates and resins. Enter every oil’s terpene % to use this target (0 for a known zero). Leave the target blank to blend oils without adding terpenes.
 
-Potency and total terpene content are weighted by mass. An estimate requires the corresponding percentage for every oil; blank values remain unknown, while explicit zero is valid. Added terpene percentages do not include terpenes already present in the oils.
+For starting oil mass `O`, existing terpene mass `E`, and target fraction `T`, required pure terpene addition is `(T × O - E) / (1 - T)`. The calculator shows the addition for the whole batch and each jar. Targets below the starting content or at/above 100% cannot be achieved by adding pure terpenes.
+
+Add one or more terpene lines and split the required addition using **% of terpene blend**; these shares must total 100%. Added lines assume pure terpenes with no potency. All ingredients are divided evenly across jars, with no processing loss deducted. Estimated potency is weighted by mass and accounts for dilution from added terpenes. Missing percentages remain unknown.
+
+Previously saved recipes retain their recorded addition percentages. **Use Target Total Terpene %** converts their line percentages to blend shares and, when starting terpene content is known, carries forward the equivalent final target. Published snapshots retain their original calculations.
 
 Use **Print Jar Recipe** for the identical recipe to repeat in every jar. Save drafts, lock/unlock the formula, publish snapshots, and export/import templates as usual. Published cards and PDFs preserve the original inputs and per-jar amounts.
 

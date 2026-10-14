@@ -45,6 +45,11 @@ function createRecipePdf(version) {
       field("Number of jars", calculations.jar_count);
       field("Total oil (grams)", calculations.oil_total_grams);
       field("Added terpenes (grams)", calculations.added_terpene_grams);
+      if (calculations.terpene_mode === "target") {
+        field("Target total terpene %", calculations.target_terpene_percent);
+        field("Terpenes already in oils (grams)", calculations.existing_terpene_grams);
+        field("Terpenes to add per jar (grams)", calculations.required_terpene_per_jar_grams);
+      }
       field("Final blend (grams)", calculations.total_batch_grams);
       field("Total grams per jar", calculations.per_jar_grams);
       field("Estimated final potency %", calculations.estimated_potency_percent);
@@ -58,7 +63,7 @@ function createRecipePdf(version) {
         field("Input potency %", item.potency_percent);
         field("Input terpene %", item.terpene_percent);
       }
-      doc.moveDown(0.5).text("Added terpene percentages refer to the final blend weight. Added lines assume pure terpenes with 0% potency. Total terpene content includes recorded terpenes already in the oils. Missing percentages are not zero; estimates require all oil percentages for that measurement.");
+      doc.moveDown(0.5).text((calculations.terpene_mode === "target" ? "Target terpene % includes the terpenes already in the oils. Terpene line shares split only the required addition. " : "Added terpene percentages refer to the final blend weight. ") + " Added lines assume pure terpenes with 0% potency. Total terpene content includes recorded terpenes already in the oils. Missing percentages are not zero; estimates require all oil percentages for that measurement.");
     }
 
     heading("Quantity and nutrition analysis guide");

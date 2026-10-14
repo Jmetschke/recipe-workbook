@@ -894,7 +894,7 @@ function vapeDistillateIngredient(liters = 0) {
 function blankRecipe(recipeCardType = "Edible/Topical") {
   if (recipeCardType === ResinBlend.TYPE) return {
     ...blankRecipe(), name: "Untitled Resin Blend", recipe_card_type: ResinBlend.TYPE,
-    product_type: "Resin Blend", resin_blend: { jar_count: 1,
+    product_type: "Resin Blend", resin_blend: { jar_count: 1, terpene_mode: "target", target_terpene_percent: "",
       oils: ["distillate", "resin"].map((kind) => ({ kind, name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" })), terpenes: [] }
   };
   const vape = recipeCardType === "Vape";
