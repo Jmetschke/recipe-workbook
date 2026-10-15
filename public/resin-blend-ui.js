@@ -48,9 +48,9 @@ function renderBlendTerpeneSummary(c) {
   </div>`;
 }
 
-function updateResinBlendResult() {
+function updateResinBlendResult(recalculate = true) {
   const recipe = state.currentRecipe;
-  recipe.calculations = ResinBlend.calculate(recipe);
+  if (recalculate) recipe.calculations = ResinBlend.calculate(recipe);
   recipe.ingredients = recipe.calculations.ingredients;
   recipe.batch_size = recipe.calculations.total_batch_grams;
   const result = content.querySelector("#resinBlendResult");
@@ -69,7 +69,7 @@ function updateResinBlendResult() {
   if (print) print.disabled = !recipe.calculations.valid;
 }
 
-function collectResinBlendRecipe() {
+function collectResinBlendRecipe(refresh = true) {
   const recipe = state.currentRecipe;
   content.querySelectorAll("[name]").forEach((input) => {
     recipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
@@ -79,7 +79,7 @@ function collectResinBlendRecipe() {
   recipe.active_additives = [];
   recipe.batch_size_mode = "grams";
   recipe.batch_unit = "grams";
-  updateResinBlendResult();
+  if (refresh) updateResinBlendResult();
   return recipe;
 }
 
@@ -154,7 +154,6 @@ function renderResinBlendEditor() {
   </div>`;
   renderStepRows();
   bindEditor();
-  content.querySelectorAll("[name]").forEach((element) => element.addEventListener("input", updateResinBlendResult));
   content.querySelectorAll("[data-blend-field]").forEach((element) => element.addEventListener("input", () => {
     if (locked) return;
     r.resin_blend[element.dataset.blendGroup][Number(element.dataset.blendIndex)][element.dataset.blendField] = element.value;
@@ -170,8 +169,8 @@ function renderResinBlendEditor() {
     r.resin_blend.target_terpene_percent = event.target.value;
     updateResinBlendResult();
   });
-  const rerender = () => { collectResinBlendRecipe(); renderResinBlendEditor(); };
-  content.querySelector("#useTerpeneTarget")?.addEventListener("click", () => {
+  const rerender = () => { collectResinBlendRecipe(false); renderResinBlendEditor(); };
+  bindAction(content.querySelector("#useTerpeneTarget"), () => {
     const previous = ResinBlend.calculate(r);
     const sum = r.resin_blend.terpenes.reduce((total, row) => total + Number(row.percent || 0), 0);
     r.resin_blend.target_terpene_percent = previous.estimated_terpene_percent ?? "";
@@ -179,7 +178,7 @@ function renderResinBlendEditor() {
     r.resin_blend.terpene_mode = "target";
     rerender();
   });
-  content.querySelectorAll("[data-add-blend-oil]").forEach((button) => button.addEventListener("click", () => {
+  content.querySelectorAll("[data-add-blend-oil]").forEach((button) => bindAction(button, () => {
     r.resin_blend.oils.push({ kind: button.dataset.addBlendOil, name: "", grams: "", potency_percent: "", terpene_percent: "", metrc_number: "" });
     rerender();
   }));
@@ -188,16 +187,16 @@ function renderResinBlendEditor() {
     r.resin_blend.oils[Number(select.dataset.oilKind)].kind = select.value;
     rerender();
   }));
-  content.querySelector("#addBlendTerpene")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#addBlendTerpene"), () => {
     r.resin_blend.terpenes.push({ name: "", percent: targetMode && !r.resin_blend.terpenes.length ? 100 : "", metrc_number: "" });
     rerender();
   });
-  content.querySelectorAll("[data-blend-remove]").forEach((button) => button.addEventListener("click", () => {
+  content.querySelectorAll("[data-blend-remove]").forEach((button) => bindAction(button, () => {
     r.resin_blend[button.dataset.blendRemove].splice(Number(button.dataset.index), 1);
     rerender();
   }));
-  updateResinBlendResult();
-  content.querySelector("#printBlendRecipe").addEventListener("click", () => {
+  updateResinBlendResult(false);
+  bindAction(content.querySelector("#printBlendRecipe"), () => {
     collectResinBlendRecipe();
     if (!r.calculations.valid) return;
     content.querySelector("#blendPrintDetails").innerHTML = `<p>Version: ${escapeHtml(r.current_version || "Draft")} · Production date: ${escapeHtml(r.expected_production_date || "Not recorded")}</p><h2>SOP Instructions</h2><ol>${r.steps.map((step) => `<li>${escapeHtml(step.instruction_text)}</li>`).join("")}</ol><h2>Notes</h2><p>${r.notes.map(escapeHtml).join("<br>")}</p>`;

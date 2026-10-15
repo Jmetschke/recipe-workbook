@@ -32,6 +32,11 @@ async function get(sql, args = []) {
   return rows[0] || null;
 }
 
+async function batch(statements = []) {
+  if (!statements.length) return [];
+  return client.batch(statements, "write");
+}
+
 async function migrate() {
   const statements = [
     `CREATE TABLE IF NOT EXISTS recipes (
@@ -244,16 +249,18 @@ async function listRecipes(filters = {}) {
 }
 
 async function replaceChildren(recipeId, ingredients = [], steps = []) {
-  await execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?", [recipeId]);
-  await execute("DELETE FROM recipe_steps WHERE recipe_id = ?", [recipeId]);
+  const statements = [
+    { sql: "DELETE FROM recipe_ingredients WHERE recipe_id = ?", args: [recipeId] },
+    { sql: "DELETE FROM recipe_steps WHERE recipe_id = ?", args: [recipeId] }
+  ];
 
   for (const [index, item] of ingredients.entries()) {
-    await execute(
-      `INSERT INTO recipe_ingredients (
+    statements.push({
+      sql: `INSERT INTO recipe_ingredients (
         recipe_id, sort_order, ingredient_type, ingredient_name, description, formula_qty, formula_percent, batch_qty, unit,
         phase, vendor, lot_number, cost_per_unit, calculated_cost, notes, original_ingredient_name, match_confidence, match_status
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+      args: [
         recipeId,
         item.sort_order || index + 1,
         item.ingredient_type || "",
@@ -273,15 +280,17 @@ async function replaceChildren(recipeId, ingredients = [], steps = []) {
         item.match_confidence ?? 1,
         item.match_status || "matched"
       ]
-    );
+    });
   }
 
   for (const [index, step] of steps.entries()) {
-    await execute(
-      "INSERT INTO recipe_steps (recipe_id, sort_order, instruction_text) VALUES (?, ?, ?)",
-      [recipeId, step.sort_order || index + 1, step.instruction_text || step.text || ""]
-    );
+    statements.push({
+      sql: "INSERT INTO recipe_steps (recipe_id, sort_order, instruction_text) VALUES (?, ?, ?)",
+      args: [recipeId, step.sort_order || index + 1, step.instruction_text || step.text || ""]
+    });
   }
+
+  await batch(statements);
 }
 
 async function calculateWithActiveMatches(recipe, ingredients) {
@@ -550,15 +559,16 @@ async function markImportJobCreated(importJobId, recipeId) {
 }
 
 async function upsertMasterIngredients(ingredients = []) {
-  for (const item of ingredients.filter((ingredient) => ingredient.ingredient_name)) {
-    const deleted = await get(
-      "SELECT normalized_name FROM ingredients_master_deleted WHERE normalized_name = LOWER(?)",
-      [String(item.ingredient_name).trim()]
-    );
-    if (deleted) continue;
+  const namedIngredients = ingredients.filter((ingredient) => ingredient.ingredient_name);
+  if (!namedIngredients.length) return;
+  const deletedNames = new Set((await all("SELECT normalized_name FROM ingredients_master_deleted"))
+    .map((row) => String(row.normalized_name || "").toLowerCase()));
+  const statements = [];
+  for (const item of namedIngredients) {
+    if (deletedNames.has(String(item.ingredient_name).trim().toLowerCase())) continue;
     const gramsConversion = item.grams_conversion || item.gram_conversion || item.default_grams_conversion || 1;
-    await execute(
-      `INSERT INTO ingredients_master (
+    statements.push({
+      sql: `INSERT INTO ingredients_master (
         ingredient_name, ingredient_type, description, default_unit, default_vendor, default_cost,
         unit_of_measure, grams_conversion, default_grams_conversion, source, notes
       )
@@ -574,7 +584,7 @@ async function upsertMasterIngredients(ingredients = []) {
         default_grams_conversion = CASE WHEN excluded.default_grams_conversion > 0 THEN excluded.default_grams_conversion ELSE ingredients_master.default_grams_conversion END,
         source = COALESCE(NULLIF(excluded.source, ''), ingredients_master.source),
         notes = COALESCE(NULLIF(excluded.notes, ''), ingredients_master.notes)`,
-      [
+      args: [
         item.ingredient_name,
         item.ingredient_type || "",
         item.description || "",
@@ -587,8 +597,9 @@ async function upsertMasterIngredients(ingredients = []) {
         item.source || "Recipe",
         item.notes || ""
       ]
-    );
+    });
   }
+  await batch(statements);
 }
 
 async function seedInventoryIngredients() {

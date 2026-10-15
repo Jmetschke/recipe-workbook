@@ -14,6 +14,16 @@ const content = document.querySelector("#content");
 const title = document.querySelector("#pageTitle");
 const subtitle = document.querySelector("#pageSubtitle");
 const toast = document.querySelector("#toast");
+let recipeRequestSequence = 0;
+let viewRequestSequence = 0;
+let ingredientsRequest = null;
+let ingredientsLoaded = false;
+let toastTimeout;
+
+function beginView() {
+  recipeRequestSequence += 1; // Invalidate search responses belonging to the previous screen.
+  return ++viewRequestSequence;
+}
 
 function money(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -405,7 +415,8 @@ function calculateClientRecipe(recipe) {
 function showToast(message) {
   toast.textContent = message;
   toast.classList.remove("hidden");
-  window.setTimeout(() => toast.classList.add("hidden"), 2800);
+  window.clearTimeout(toastTimeout);
+  toastTimeout = window.setTimeout(() => toast.classList.add("hidden"), 5000);
 }
 
 async function api(path, options = {}) {
@@ -429,7 +440,19 @@ function setPage(name, help) {
 
 async function loadRecipes(params = {}) {
   const query = new URLSearchParams(params).toString();
-  state.recipes = await api(`/api/recipes${query ? `?${query}` : ""}`);
+  const sequence = ++recipeRequestSequence;
+  const recipes = await api(`/api/recipes${query ? `?${query}` : ""}`);
+  if (sequence !== recipeRequestSequence) return false;
+  state.recipes = recipes;
+  return true;
+}
+
+function debounce(callback, delay = 250) {
+  let timeout;
+  return (...args) => {
+    window.clearTimeout(timeout);
+    timeout = window.setTimeout(() => Promise.resolve(callback(...args)).catch((error) => showToast(error.message)), delay);
+  };
 }
 
 function escapeHtml(value) {
@@ -441,10 +464,15 @@ function escapeHtml(value) {
 }
 
 async function loadIngredientsMaster(force = false) {
-  if (force || !state.ingredientsMaster.length) {
-    state.ingredientsMaster = await api("/api/ingredients");
+  if (!force && ingredientsLoaded) return state.ingredientsMaster;
+  if (!ingredientsRequest) {
+    ingredientsRequest = api("/api/ingredients").then((ingredients) => {
+      state.ingredientsMaster = ingredients;
+      ingredientsLoaded = true;
+      return ingredients;
+    }).finally(() => { ingredientsRequest = null; });
   }
-  return state.ingredientsMaster;
+  return ingredientsRequest;
 }
 
 function ingredientOptionsMarkup() {
@@ -614,7 +642,7 @@ function dashboardTemplateImportMarkup() {
 }
 
 function bindDashboardTemplateImport() {
-  content.querySelector("#dashboardTemplateImportForm")?.addEventListener("submit", async (event) => {
+  bindSubmit(content.querySelector("#dashboardTemplateImportForm"), async (event) => {
     event.preventDefault();
     const submitButton = event.currentTarget.querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = true;
@@ -630,6 +658,7 @@ function bindDashboardTemplateImport() {
 }
 
 async function renderDashboard(filter = "All") {
+  const viewRequest = beginView();
   state.view = filter === "Template" ? "templates" : filter === "Draft" ? "drafts" : filter === "Archived" ? "archived" : "dashboard";
   if (filter === "All") state.dashboardWindowStartKey = localDateKey(startOfWeek());
   const pageName = filter === "Template" ? "Templates" : filter === "Draft" ? "Draft Recipes" : filter === "Archived" ? "Archived Recipes" : "Dashboard";
@@ -639,7 +668,7 @@ async function renderDashboard(filter = "All") {
       ? "Template recipes stay formula-locked and can be duplicated into production drafts."
     : "Search and manage recipe drafts, published formulas, and archived records.";
   setPage(pageName, pageHelp);
-  await loadRecipes(filter === "All" ? {} : { status: filter });
+  if (!await loadRecipes(filter === "All" ? {} : { status: filter }) || viewRequest !== viewRequestSequence) return;
   const visibleRecipes = filter === "All" ? state.recipes.filter((recipe) => recipe.status !== "Archived") : state.recipes;
   content.innerHTML = `
     <section class="section">
@@ -660,16 +689,20 @@ async function renderDashboard(filter = "All") {
       <div id="recipeList">${recipeSections(visibleRecipes, filter)}</div>
     </section>
   `;
-  content.querySelector("#searchInput").addEventListener("input", async (event) => {
-    await loadRecipes({ q: event.target.value, status: content.querySelector("#statusFilter").value });
+  content.querySelector("#searchInput").addEventListener("input", debounce(async (event) => {
+    const searchInput = event.target;
+    if (!searchInput.isConnected || viewRequest !== viewRequestSequence) return;
+    const loaded = await loadRecipes({ q: searchInput.value, status: content.querySelector("#statusFilter").value });
+    if (!loaded) return;
+    if (!searchInput.isConnected) return;
     const currentFilter = content.querySelector("#statusFilter").value;
     const nextVisibleRecipes = currentFilter === "All" ? state.recipes.filter((recipe) => recipe.status !== "Archived") : state.recipes;
     const miniCalendar = content.querySelector("#dashboardMiniCalendar");
     if (miniCalendar) miniCalendar.outerHTML = renderDashboardMiniCalendar(nextVisibleRecipes);
     content.querySelector("#recipeList").innerHTML = recipeSections(nextVisibleRecipes, currentFilter);
     bindRecipeListButtons();
-  });
-  content.querySelector("#statusFilter").addEventListener("change", (event) => renderDashboard(event.target.value));
+  }));
+  bindAction(content.querySelector("#statusFilter"), (event) => renderDashboard(event.target.value), "change");
   bindDashboardTemplateImport();
   bindRecipeListButtons();
 }
@@ -751,13 +784,13 @@ function refreshDashboardMiniCalendar() {
 }
 
 function bindMiniCalendarButtons() {
-  content.querySelectorAll("[data-mini-card-recipe]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.miniCardRecipe)));
+  content.querySelectorAll("[data-mini-card-recipe]").forEach((button) => bindAction(button, () => renderCards(button.dataset.miniCardRecipe)));
   content.querySelectorAll("[data-dashboard-calendar-day]").forEach((cell) => {
     const selectDay = () => {
       state.selectedDashboardDate = cell.dataset.dashboardCalendarDay;
       refreshDashboardMiniCalendar();
     };
-    cell.addEventListener("click", (event) => {
+    bindAction(cell, (event) => {
       if (event.target.closest("[data-mini-card-recipe]")) return;
       selectDay();
     });
@@ -767,13 +800,13 @@ function bindMiniCalendarButtons() {
       selectDay();
     });
   });
-  content.querySelector("[data-view-full-calendar]")?.addEventListener("click", () => renderCards());
-  content.querySelectorAll("[data-dashboard-calendar-shift]").forEach((button) => button.addEventListener("click", () => {
+  bindAction(content.querySelector("[data-view-full-calendar]"), () => renderCards());
+  content.querySelectorAll("[data-dashboard-calendar-shift]").forEach((button) => bindAction(button, () => {
     const start = parseLocalDate(state.dashboardWindowStartKey || localDateKey(startOfWeek()));
     state.dashboardWindowStartKey = localDateKey(addDays(start, Number(button.dataset.dashboardCalendarShift)));
     refreshDashboardMiniCalendar();
   }));
-  content.querySelector("[data-dashboard-calendar-current]")?.addEventListener("click", () => {
+  bindAction(content.querySelector("[data-dashboard-calendar-current]"), () => {
     state.dashboardWindowStartKey = localDateKey(startOfWeek());
     refreshDashboardMiniCalendar();
   });
@@ -830,7 +863,7 @@ function bindCalendarDragAndDrop({ cardSelector, cellSelector, recipeIdAttribute
       if (!recipe || !date || recipe.expected_production_date === date) return;
       try {
         await reschedulePublishedRecipe(recipeId, date);
-        afterMove(date);
+        if (cell.isConnected) await afterMove(date);
       } catch (error) {
         showToast(error.message);
       }
@@ -839,43 +872,45 @@ function bindCalendarDragAndDrop({ cardSelector, cellSelector, recipeIdAttribute
 }
 
 async function unpublishRecipeFromUi(recipeId, after = "Draft") {
+  const viewRequest = viewRequestSequence;
   if (!window.confirm("Unpublish this recipe and return it to Drafts for editing? Published version history will remain saved.")) return;
   const draft = await api(`/api/recipes/${recipeId}/unpublish`, { method: "POST", body: {} });
+  if (viewRequest !== viewRequestSequence) return;
   state.recipes = state.recipes.filter((recipe) => recipe.id !== draft.id).concat(draft);
   showToast("Recipe moved back to Drafts.");
-  if (after === "cards") renderCards();
-  else renderEditor(draft.id, draft, "draft");
+  if (after === "cards") return renderCards();
+  return renderEditor(draft.id, draft, "draft");
 }
 
 function bindRecipeListButtons() {
-  content.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => renderEditor(button.dataset.open)));
-  content.querySelectorAll("[data-print-card]").forEach((button) => button.addEventListener("click", () => renderCards(button.dataset.printCard)));
-  content.querySelectorAll("[data-unpublish-card]").forEach((button) => button.addEventListener("click", () => unpublishRecipeFromUi(button.dataset.unpublishCard)));
-  content.querySelectorAll("[data-export-template]").forEach((button) => button.addEventListener("click", () => {
+  content.querySelectorAll("[data-open]").forEach((button) => bindAction(button, () => renderEditor(button.dataset.open)));
+  content.querySelectorAll("[data-print-card]").forEach((button) => bindAction(button, () => renderCards(button.dataset.printCard)));
+  content.querySelectorAll("[data-unpublish-card]").forEach((button) => bindAction(button, () => unpublishRecipeFromUi(button.dataset.unpublishCard)));
+  content.querySelectorAll("[data-export-template]").forEach((button) => bindAction(button, () => {
     window.location.href = `/api/recipes/${button.dataset.exportTemplate}/template-export`;
   }));
   bindMiniCalendarButtons();
-  content.querySelectorAll("[data-duplicate]").forEach((button) => button.addEventListener("click", async () => {
+  content.querySelectorAll("[data-duplicate]").forEach((button) => bindAction(button, async () => {
     const copy = await api(`/api/recipes/${button.dataset.duplicate}/duplicate`, { method: "POST", body: {} });
     showToast("Recipe duplicated.");
-    renderEditor(copy.id);
+    return renderEditor(copy.id, copy);
   }));
-  content.querySelectorAll("[data-duplicate-new]").forEach((button) => button.addEventListener("click", async () => {
+  content.querySelectorAll("[data-duplicate-new]").forEach((button) => bindAction(button, async () => {
     const copy = await api(`/api/recipes/${button.dataset.duplicateNew}/duplicate-new`, { method: "POST", body: {} });
     showToast("New recipe started. Edit the recipe name and details, then save your draft.");
-    renderEditor(copy.id, copy, "draft");
+    return renderEditor(copy.id, copy, "draft");
   }));
-  content.querySelectorAll("[data-archive-card]").forEach((button) => button.addEventListener("click", async () => {
+  content.querySelectorAll("[data-archive-card]").forEach((button) => bindAction(button, async () => {
     if (!window.confirm("Archive this recipe?")) return;
     await api(`/api/recipes/${button.dataset.archiveCard}/archive`, { method: "PATCH", body: {} });
     showToast("Recipe archived.");
-    renderDashboard(state.view === "archived" ? "Archived" : content.querySelector("#statusFilter")?.value || "All");
+    return renderDashboard(state.view === "archived" ? "Archived" : content.querySelector("#statusFilter")?.value || "All");
   }));
-  content.querySelectorAll("[data-delete-card]").forEach((button) => button.addEventListener("click", async () => {
+  content.querySelectorAll("[data-delete-card]").forEach((button) => bindAction(button, async () => {
     if (!window.confirm("Delete this recipe and any published versions?")) return;
     await api(`/api/recipes/${button.dataset.deleteCard}`, { method: "DELETE" });
     showToast("Recipe deleted.");
-    renderDashboard(state.view === "archived" ? "Archived" : content.querySelector("#statusFilter")?.value || "All");
+    return renderDashboard(state.view === "archived" ? "Archived" : content.querySelector("#statusFilter")?.value || "All");
   }));
 }
 
@@ -927,6 +962,7 @@ function blankRecipe(recipeCardType = "Edible/Topical") {
 }
 
 async function renderNewRecipeChoice() {
+  beginView();
   state.view = "new-recipe";
   setPage("New Recipe", "Choose the recipe card type before building the formula.");
   content.innerHTML = `
@@ -950,15 +986,20 @@ async function renderNewRecipeChoice() {
       </div>
     </section>
   `;
-  content.querySelectorAll("[data-new-card-type]").forEach((button) => button.addEventListener("click", () => {
-    renderEditor(null, blankRecipe(button.dataset.newCardType));
+  content.querySelectorAll("[data-new-card-type]").forEach((button) => bindAction(button, () => {
+    return renderEditor(null, blankRecipe(button.dataset.newCardType));
   }));
 }
 
 async function renderEditor(id, recipe = null, mode = null) {
+  const viewRequest = beginView();
   state.view = "editor";
-  await loadIngredientsMaster();
-  state.currentRecipe = recipe || (id ? await api(`/api/recipes/${id}`) : blankRecipe());
+  const [nextRecipe] = await Promise.all([
+    recipe || (id ? api(`/api/recipes/${id}`) : blankRecipe()),
+    recipe && isResinBlendRecipe(recipe) ? null : loadIngredientsMaster()
+  ]);
+  if (viewRequest !== viewRequestSequence) return;
+  state.currentRecipe = nextRecipe;
   state.editorMode = mode || (state.currentRecipe.status === "Published"
     ? "published-view"
     : state.currentRecipe.status === "Template" ? "template-view" : "draft");
@@ -1378,6 +1419,11 @@ function refreshCalculationDisplay(updateRows = false) {
     bindActiveAdditiveTool();
   }
 
+  const status = content.querySelector("#calculationStatus");
+  if (status) {
+    status.textContent = "Calculated quantities are up to date. Save to keep your changes.";
+    status.classList.remove("calculation-pending");
+  }
   if (!updateRows) return;
   content.querySelectorAll("#ingredientRows tr").forEach((row) => {
     const index = Number(row.dataset.index);
@@ -1450,7 +1496,9 @@ function bindActiveAdditiveTool() {
       const row = input.closest("[data-additive-index]");
       const additive = state.currentRecipe.active_additives[Number(row.dataset.additiveIndex)];
       if (!additive) return;
-      additive[input.dataset.additiveField] = input.type === "number" ? Number(input.value) : input.value;
+      additive[input.dataset.additiveField] = input.dataset.additiveField === "terpene_share_percent"
+        ? Number(input.value) / 100
+        : input.type === "number" ? Number(input.value) : input.value;
       if (input.dataset.additiveField === "ingredient_index") {
         const ingredient = state.currentRecipe.ingredients[Number(additive.ingredient_index)];
         if (ingredient) additive.ingredient_name = ingredient.ingredient_name || additive.ingredient_name || "";
@@ -1467,17 +1515,15 @@ function bindActiveAdditiveTool() {
         additive.mg_per_unit = additive.target_mg_per_unit || "";
       }
       markCalculationsPending();
-      rerenderActiveAdditiveTool();
+      if (input.dataset.additiveField === "concentration_type") rerenderActiveAdditiveTool();
     };
-    input.addEventListener("change", updateAdditive);
+    input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateAdditive);
   });
-  content.querySelector("#applyActiveQty")?.addEventListener("click", () => {
-    const applied = applyAdditiveCalculationsToMatches();
-    renderIngredientRows();
+  bindAction(content.querySelector("#applyActiveQty"), () => {
     refreshCalculationDisplay(true);
-    showToast(applied ? "Calculated additive quantities applied." : "Match an additive to a recipe ingredient first.");
+    showToast("Calculated quantities updated.");
   });
-  content.querySelector("#addActiveToRecipe")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#addActiveToRecipe"), () => {
     const name = "";
     const ingredient = {
       ingredient_name: name,
@@ -1495,13 +1541,13 @@ function bindActiveAdditiveTool() {
     markCalculationsPending();
     showToast("New additive added to recipe and calculator.");
   });
-  content.querySelector("#addAdditiveCalculation")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#addAdditiveCalculation"), () => {
     state.currentRecipe.active_additives.push(newAdditiveCalculation("", ""));
     rerenderActiveAdditiveTool();
     markCalculationsPending();
     showToast("New additive calculation added.");
   });
-  content.querySelectorAll("[data-remove-additive]").forEach((button) => button.addEventListener("click", () => {
+  content.querySelectorAll("[data-remove-additive]").forEach((button) => bindAction(button, () => {
     state.currentRecipe.active_additives.splice(Number(button.dataset.removeAdditive), 1);
     rerenderActiveAdditiveTool();
     markCalculationsPending();
@@ -1535,10 +1581,6 @@ function renderIngredientRows() {
         if (input.tagName === "SELECT") input.disabled = true;
         else input.readOnly = true;
       }
-      if (readOnlyRecipe && input.dataset.field !== "batch_qty") {
-        if (input.tagName === "SELECT") input.disabled = true;
-        else input.readOnly = true;
-      }
       const updateIngredientField = () => {
         state.currentRecipe.ingredients[index][input.dataset.field] = input.type === "number" ? Number(input.value) : input.value;
         if (input.dataset.field === "formula_qty") {
@@ -1560,8 +1602,7 @@ function renderIngredientRows() {
         }
         markCalculationsPending();
       };
-      input.addEventListener("input", updateIngredientField);
-      input.addEventListener("change", updateIngredientField);
+      input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateIngredientField);
     });
     const removeButton = row.querySelector("[data-action='removeIngredient']");
     if (readOnlyRecipe || formulaLocked) {
@@ -1626,12 +1667,12 @@ function renderStepRows() {
     const index = Number(textarea.closest(".step-row").dataset.index);
     state.currentRecipe.steps[index].instruction_text = textarea.value;
   }));
-  wrapper.querySelectorAll("[data-remove-step]").forEach((button) => button.addEventListener("click", () => {
+  wrapper.querySelectorAll("[data-remove-step]").forEach((button) => bindAction(button, () => {
     state.currentRecipe.steps.splice(Number(button.dataset.removeStep), 1);
     renderStepRows();
   }));
-  wrapper.querySelectorAll("[data-up]").forEach((button) => button.addEventListener("click", () => moveStep(Number(button.dataset.up), -1)));
-  wrapper.querySelectorAll("[data-down]").forEach((button) => button.addEventListener("click", () => moveStep(Number(button.dataset.down), 1)));
+  wrapper.querySelectorAll("[data-up]").forEach((button) => bindAction(button, () => moveStep(Number(button.dataset.up), -1)));
+  wrapper.querySelectorAll("[data-down]").forEach((button) => bindAction(button, () => moveStep(Number(button.dataset.down), 1)));
 }
 
 function moveStep(index, delta) {
@@ -1678,18 +1719,20 @@ function collectRecipe() {
 }
 
 function bindEditor() {
-  bindActiveAdditiveTool();
+  const editorRequest = viewRequestSequence;
+  if (!isResinBlendRecipe()) bindActiveAdditiveTool();
+  content.querySelectorAll("#saveRecipe, #publishRecipe, #recalculate, #duplicateRecipe, #duplicateNewRecipe, #makeTemplate, #archiveRecipe, #deleteRecipe, #toggleFormulaLock, #unpublishRecipe").forEach((button) => { button.dataset.writeAction = ""; });
 
-  content.querySelector("#startPerJarBlend")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#startPerJarBlend"), () => {
     const source = collectRecipe();
     const recipe = { ...blankRecipe(ResinBlend.TYPE), name: source.name,
       product_type: source.product_type, flavor: source.flavor,
       expected_production_date: source.expected_production_date,
       notes: [...(source.notes || [])], steps: (source.steps || []).map((step) => ({ instruction_text: step.instruction_text })) };
-    renderEditor(null, recipe, "draft");
+    return renderEditor(null, recipe, "draft");
   });
 
-  content.querySelector("#toggleFormulaLock")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#toggleFormulaLock"), async () => {
     const readOnly = state.editorMode === "published-view" || state.editorMode === "template-view";
     const recipe = readOnly ? state.currentRecipe : collectRecipe();
     const mode = readOnly ? (recipe.status === "Template" ? "template-edit" : "published-edit") : state.editorMode;
@@ -1701,60 +1744,62 @@ function bindEditor() {
   content.querySelectorAll("[name]").forEach((input) => {
     const updateHeader = () => {
       state.currentRecipe[input.name] = input.type === "number" ? Number(input.value) : input.value;
+      if (isResinBlendRecipe()) { updateResinBlendResult(); return; }
       syncVapeDistillateIngredient(state.currentRecipe);
       syncDistillateResinBlendIngredients(state.currentRecipe);
       state.currentRecipe.batch_unit = isVapeRecipe() ? "L" : "grams";
       markCalculationsPending();
     };
-    input.addEventListener("input", updateHeader);
-    input.addEventListener("change", updateHeader);
+    input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateHeader);
   });
 
-  content.querySelector("#editPublished")?.addEventListener("click", () => {
-    renderEditor(state.currentRecipe.id, state.currentRecipe, "published-edit");
+  bindAction(content.querySelector("#editPublished"), () => {
+    return renderEditor(state.currentRecipe.id, state.currentRecipe, "published-edit");
   });
-  content.querySelector("#editTemplate")?.addEventListener("click", () => {
-    renderEditor(state.currentRecipe.id, state.currentRecipe, "template-edit");
+  bindAction(content.querySelector("#editTemplate"), () => {
+    return renderEditor(state.currentRecipe.id, state.currentRecipe, "template-edit");
   });
-  content.querySelector("#unpublishRecipe")?.addEventListener("click", () => unpublishRecipeFromUi(state.currentRecipe.id));
-  content.querySelector("#exportTemplateRecipe")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#unpublishRecipe"), () => unpublishRecipeFromUi(state.currentRecipe.id));
+  bindAction(content.querySelector("#exportTemplateRecipe"), () => {
     window.location.href = `/api/recipes/${state.currentRecipe.id}/template-export`;
   });
-  content.querySelector("#closeWithoutSaving")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#closeWithoutSaving"), () => {
     if (!window.confirm("Close without saving changes?")) return;
     showToast("Closed without saving.");
-    renderDashboard();
+    return renderDashboard();
   });
-  content.querySelector("#deleteRecipe")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#deleteRecipe"), async () => {
     if (!window.confirm("Delete this recipe and its published versions?")) return;
     await api(`/api/recipes/${state.currentRecipe.id}`, { method: "DELETE" });
+    if (editorRequest !== viewRequestSequence) return;
     showToast("Recipe deleted.");
-    renderDashboard();
+    return renderDashboard();
   });
-  content.querySelector("#addIngredient")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#addIngredient"), () => {
     state.currentRecipe.ingredients.push({ ingredient_type: "", ingredient_name: "", unit: isVapeRecipe() ? "L" : "grams", formula_qty: 0, formula_percent: 0, batch_qty: 0 });
     renderIngredientRows();
     markCalculationsPending();
   });
-  content.querySelector("#addStep")?.addEventListener("click", () => {
+  bindAction(content.querySelector("#addStep"), () => {
     state.currentRecipe.steps.push({ instruction_text: "" });
     renderStepRows();
   });
-  content.querySelector("#saveRecipe")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#saveRecipe"), async () => {
     const payload = collectRecipe();
     const savedAsNewDocument = !payload.id && Boolean(payload.copied_from_recipe_id);
     const saved = payload.id
       ? await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload })
       : await api("/api/recipes", { method: "POST", body: payload });
+    if (editorRequest !== viewRequestSequence) return;
     const savedPublishedRecord = state.editorMode === "published-edit" || state.editorMode === "template-edit";
     showToast(savedPublishedRecord ? "Changes saved." : savedAsNewDocument ? "New document saved." : payload.status === "Template" ? "Template saved." : "Draft saved.");
     if (savedPublishedRecord) {
-      renderEditor(saved.id, saved, saved.status === "Template" ? "template-view" : "published-view");
+      return renderEditor(saved.id, saved, saved.status === "Template" ? "template-view" : "published-view");
     } else {
-      renderDashboard();
+      return renderDashboard();
     }
   });
-  content.querySelector("#recalculate")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#recalculate"), async () => {
     const payload = collectRecipe();
     if (!payload.id) {
       refreshCalculationDisplay(true);
@@ -1762,20 +1807,23 @@ function bindEditor() {
       return;
     }
     const saved = await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
+    if (editorRequest !== viewRequestSequence) return;
     showToast("Recipe recalculated.");
-    renderEditor(saved.id);
+    return renderEditor(saved.id, saved, state.editorMode);
   });
-  content.querySelector("#duplicateRecipe")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#duplicateRecipe"), async () => {
     const copy = await api(`/api/recipes/${state.currentRecipe.id}/duplicate`, { method: "POST", body: {} });
+    if (editorRequest !== viewRequestSequence) return;
     showToast("Recipe duplicated.");
-    renderEditor(copy.id);
+    return renderEditor(copy.id, copy);
   });
-  content.querySelector("#duplicateNewRecipe")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#duplicateNewRecipe"), async () => {
     const copy = await api(`/api/recipes/${state.currentRecipe.id}/duplicate-new`, { method: "POST", body: {} });
+    if (editorRequest !== viewRequestSequence) return;
     showToast("New recipe started. Edit the recipe name and details, then save your draft.");
-    renderEditor(copy.id, copy, "draft");
+    return renderEditor(copy.id, copy, "draft");
   });
-  content.querySelector("#makeTemplate")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#makeTemplate"), async () => {
     const payload = collectRecipe();
     const identity = await promptTemplateIdentity(payload);
     if (!identity) return;
@@ -1791,10 +1839,11 @@ function bindEditor() {
       is_new_recipe_duplicate: false
     };
     await api("/api/recipes", { method: "POST", body: templatePayload });
+    if (editorRequest !== viewRequestSequence) return;
     showToast("New template created.");
-    renderDashboard();
+    return renderDashboard();
   });
-  content.querySelector("#publishRecipe")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#publishRecipe"), async () => {
     const payload = collectRecipe();
     if (isResinBlendRecipe(payload) && !payload.calculations.valid) {
       showToast(payload.calculations.errors.join(" "));
@@ -1805,23 +1854,28 @@ function bindEditor() {
       return;
     }
     const saved = await api(`/api/recipes/${payload.id}`, { method: "PUT", body: payload });
+    if (editorRequest !== viewRequestSequence) return;
     const publishedBy = window.prompt("Published by", "Production") || "Production";
     const published = await api(`/api/recipes/${saved.id}/publish`, { method: "POST", body: { published_by: publishedBy } });
+    if (editorRequest !== viewRequestSequence) return;
     state.recipes = state.recipes.filter((recipe) => recipe.id !== published.id).concat(published);
     showToast(`Published ${published.current_version}.`);
-    renderDashboard();
+    return renderDashboard();
   });
-  content.querySelector("#archiveRecipe")?.addEventListener("click", async () => {
+  bindAction(content.querySelector("#archiveRecipe"), async () => {
     await api(`/api/recipes/${state.currentRecipe.id}/archive`, { method: "PATCH", body: {} });
+    if (editorRequest !== viewRequestSequence) return;
     showToast("Recipe archived.");
-    renderDashboard("Archived");
+    return renderDashboard("Archived");
   });
-  content.querySelector("#previewCard")?.addEventListener("click", () => renderCards(state.currentRecipe.id));
+  bindAction(content.querySelector("#previewCard"), () => renderCards(state.currentRecipe.id));
 }
 
 async function renderImport() {
+  const viewRequest = beginView();
   state.view = "import";
   await loadIngredientsMaster();
+  if (viewRequest !== viewRequestSequence) return;
   setPage("Import Spreadsheet", "Upload XLSX files, review normalized recipe variants, correct fields, then create draft recipes.");
   content.innerHTML = `
     <section class="section">
@@ -1846,19 +1900,19 @@ async function renderImport() {
     ${ingredientOptionsMarkup()}
     <div id="previewArea"></div>
   `;
-  content.querySelector("#uploadForm").addEventListener("submit", async (event) => {
+  bindSubmit(content.querySelector("#uploadForm"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     state.importPreview = await api("/api/import/xlsx", { method: "POST", body: form });
     state.selectedImportIndexes = new Set(state.importPreview.recipes.map((_, index) => index));
     renderImportPreview();
   });
-  content.querySelector("#templateImportForm").addEventListener("submit", async (event) => {
+  bindSubmit(content.querySelector("#templateImportForm"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const template = await api("/api/templates/import", { method: "POST", body: form });
     showToast(`${template.name} imported as a template.`);
-    renderDashboard("Template");
+    return renderDashboard("Template");
   });
 }
 
@@ -1976,8 +2030,7 @@ function renderImportPreview() {
       input.parentElement.querySelector(".match-alert")?.remove();
     }
     };
-    input.addEventListener("input", updateImportIngredient);
-    input.addEventListener("change", updateImportIngredient);
+    input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateImportIngredient);
   });
   area.querySelectorAll("[data-import-additive]").forEach((input) => {
     const updateImportAdditive = () => {
@@ -1995,18 +2048,17 @@ function renderImportPreview() {
         renderImportPreview();
       }
     };
-    input.addEventListener("input", updateImportAdditive);
-    input.addEventListener("change", updateImportAdditive);
+    input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateImportAdditive);
   });
   area.querySelectorAll("[data-import-step]").forEach((textarea) => textarea.addEventListener("input", () => {
     const recipe = preview.recipes[Number(textarea.dataset.importStep)];
     recipe.steps[Number(textarea.dataset.stepIndex)].instruction_text = textarea.value;
   }));
-  area.querySelector("#confirmImport").addEventListener("click", async () => {
+  bindAction(area.querySelector("#confirmImport"), async () => {
     const recipes = preview.recipes.filter((_, index) => state.selectedImportIndexes.has(index));
     const result = await api("/api/import/confirm", { method: "POST", body: { import_job_id: preview.import_job_id, recipes } });
     showToast(`${result.recipes.length} draft recipe(s) created.`);
-    renderEditor(result.recipes[0].id);
+    return renderEditor(result.recipes[0].id);
   });
 }
 
@@ -2026,21 +2078,24 @@ function existingImportIngredientOptions(recipe, value = "") {
 }
 
 async function renderCards(recipeId = null) {
+  const viewRequest = beginView();
   state.view = "cards";
   setPage("Published Calendar", "Select a production date to open the published recipe focus card.");
   if (recipeId) {
     const versions = await api(`/api/recipes/${recipeId}/versions`);
+    if (viewRequest !== viewRequestSequence) return;
     if (!versions.length) {
       content.innerHTML = '<section class="section"><p>No published versions yet.</p></section>';
       return;
     }
     return renderVersionCard(versions[0].id);
   }
-  await loadRecipes({ status: "Published" });
+  if (!await loadRecipes({ status: "Published" }) || viewRequest !== viewRequestSequence) return;
   renderPublishedCalendar(monthKey(state.recipes[0]?.expected_production_date || isoToday()));
 }
 
 function renderPublishedCalendar(activeMonth) {
+  beginView();
   const [year, month] = activeMonth.split("-").map(Number);
   const first = new Date(year, month - 1, 1);
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -2084,10 +2139,10 @@ function renderPublishedCalendar(activeMonth) {
       <div class="calendar-grid">${cells.join("")}</div>
     </section>
   `;
-  content.querySelector("#prevMonth").addEventListener("click", () => renderPublishedCalendar(prevMonth));
-  content.querySelector("#nextMonth").addEventListener("click", () => renderPublishedCalendar(nextMonth));
+  bindAction(content.querySelector("#prevMonth"), () => renderPublishedCalendar(prevMonth));
+  bindAction(content.querySelector("#nextMonth"), () => renderPublishedCalendar(nextMonth));
   content.querySelectorAll("[data-card-recipe]").forEach((button) => {
-    button.addEventListener("click", () => renderCards(button.dataset.cardRecipe));
+    bindAction(button, () => renderCards(button.dataset.cardRecipe));
   });
   bindCalendarDragAndDrop({
     cardSelector: "[data-card-recipe]",
@@ -2099,7 +2154,9 @@ function renderPublishedCalendar(activeMonth) {
 }
 
 async function renderVersionCard(versionId) {
+  const viewRequest = beginView();
   const version = await api(`/api/versions/${versionId}`);
+  if (viewRequest !== viewRequestSequence) return;
   const recipe = version.recipe;
   const calculations = version.calculations;
   const y = yieldDisplay(calculations);
@@ -2160,7 +2217,7 @@ async function renderVersionCard(versionId) {
       </div>
     </article>
   `;
-  content.querySelector("#downloadRecipePdf").addEventListener("click", async (event) => {
+  bindAction(content.querySelector("#downloadRecipePdf"), async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
     try {
@@ -2180,8 +2237,8 @@ async function renderVersionCard(versionId) {
       button.disabled = false;
     }
   });
-  content.querySelector("#printIngredientsList").addEventListener("click", () => renderPrintableIngredientList(version));
-  content.querySelector("#duplicateAndEditCard").addEventListener("click", () => {
+  bindAction(content.querySelector("#printIngredientsList"), () => renderPrintableIngredientList(version));
+  bindAction(content.querySelector("#duplicateAndEditCard"), () => {
     const copy = {
       ...recipe,
       id: undefined,
@@ -2197,25 +2254,26 @@ async function renderVersionCard(versionId) {
       calculations: { ...calculations }
     };
     showToast("Published card duplicated. Edit it, then select Save as New Document.");
-    renderEditor(null, copy);
+    return renderEditor(null, copy);
   });
-  content.querySelector("#unlockCardRecipe").addEventListener("click", async () => {
+  bindAction(content.querySelector("#unlockCardRecipe"), async () => {
     const current = await api(`/api/recipes/${recipe.id}`);
     current.copy_lock_formula = false;
     await renderEditor(current.id, current, current.status === "Published" ? "published-edit" : current.status === "Template" ? "template-edit" : "draft");
     showToast("Formula unlocked. Edit ingredients, then save your changes.");
   });
-  content.querySelector("#unpublishCardRecipe").addEventListener("click", () => unpublishRecipeFromUi(recipe.id, "Draft"));
-  content.querySelector("#backCards").addEventListener("click", () => renderCards());
-  content.querySelector("#deleteCardRecipe").addEventListener("click", async () => {
+  bindAction(content.querySelector("#unpublishCardRecipe"), () => unpublishRecipeFromUi(recipe.id, "Draft"));
+  bindAction(content.querySelector("#backCards"), () => renderCards());
+  bindAction(content.querySelector("#deleteCardRecipe"), async () => {
     if (!window.confirm("Delete this recipe and any published versions?")) return;
     await api(`/api/recipes/${recipe.id}`, { method: "DELETE" });
     showToast("Recipe deleted.");
-    renderCards();
+    return renderCards();
   });
 }
 
 function renderPrintableIngredientList(version) {
+  beginView();
   const recipe = version.recipe;
   content.innerHTML = `
     <div class="toolbar no-print">
@@ -2249,13 +2307,15 @@ function renderPrintableIngredientList(version) {
       </table>
     </article>
   `;
-  content.querySelector("#backToRecipeCard").addEventListener("click", () => renderVersionCard(version.id));
+  bindAction(content.querySelector("#backToRecipeCard"), () => renderVersionCard(version.id));
 }
 
 async function renderIngredients(editIngredientId = null) {
+  const viewRequest = beginView();
   state.view = "ingredients";
   setPage("Ingredients", "Add, edit, and remove ingredients from the master list used by all recipe dropdowns.");
   await loadIngredientsMaster(true);
+  if (viewRequest !== viewRequestSequence) return;
   const ingredients = state.ingredientsMaster;
   const editing = editIngredientId ? ingredients.find((item) => item.id === Number(editIngredientId)) : null;
   content.innerHTML = `
@@ -2318,7 +2378,7 @@ async function renderIngredients(editIngredientId = null) {
       </div>
     </section>
   `;
-  content.querySelector("#ingredientForm").addEventListener("submit", async (event) => {
+  bindSubmit(content.querySelector("#ingredientForm"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries());
@@ -2326,22 +2386,21 @@ async function renderIngredients(editIngredientId = null) {
     payload.default_grams_conversion = payload.grams_conversion;
     payload.default_cost = Number(payload.default_cost || 0);
     const saved = await api(editing ? `/api/ingredients/${editing.id}` : "/api/ingredients", { method: editing ? "PUT" : "POST", body: payload });
-    state.ingredientsMaster = [];
-    await loadIngredientsMaster(true);
+    ingredientsLoaded = false;
     showToast(`${saved.ingredient_name} ${editing ? "updated" : "added to master ingredients"}.`);
     await renderIngredients();
   });
-  content.querySelector("#cancelIngredientEdit")?.addEventListener("click", () => renderIngredients());
-  content.querySelectorAll("[data-edit-ingredient]").forEach((button) => button.addEventListener("click", async () => {
+  bindAction(content.querySelector("#cancelIngredientEdit"), () => renderIngredients());
+  content.querySelectorAll("[data-edit-ingredient]").forEach((button) => bindAction(button, async () => {
     await renderIngredients(button.dataset.editIngredient);
     content.querySelector("#ingredientForm")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }));
-  content.querySelectorAll("[data-delete-ingredient]").forEach((button) => button.addEventListener("click", async () => {
+  content.querySelectorAll("[data-delete-ingredient]").forEach((button) => bindAction(button, async () => {
     const name = button.dataset.ingredientName;
     if (!window.confirm(`Delete ${name} from the master ingredient list? Existing recipes that use it will not be changed.`)) return;
     try {
       await api(`/api/ingredients/${button.dataset.deleteIngredient}`, { method: "DELETE" });
-      state.ingredientsMaster = [];
+      state.ingredientsMaster = []; ingredientsLoaded = false;
       showToast(`${name} deleted from master ingredients.`);
       await renderIngredients();
     } catch (error) {
@@ -2351,9 +2410,11 @@ async function renderIngredients(editIngredientId = null) {
 }
 
 async function renderProductionItems() {
+  const viewRequest = beginView();
   state.view = "productionItems";
   setPage("Production Items", "Add and review finished production items for this location.");
   const items = await api("/api/production-items");
+  if (viewRequest !== viewRequestSequence) return;
   content.innerHTML = `
     <section class="section">
       <div class="section-header">
@@ -2425,7 +2486,7 @@ async function renderProductionItems() {
       </div>
     </section>
   `;
-  content.querySelector("#productionItemForm").addEventListener("submit", async (event) => {
+  bindSubmit(content.querySelector("#productionItemForm"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries());
@@ -2438,9 +2499,11 @@ async function renderProductionItems() {
 }
 
 async function renderSettings() {
+  const viewRequest = beginView();
   state.view = "settings";
   setPage("Settings", "Production calculation limits and future deployment settings.");
   const settings = await api("/api/settings");
+  if (viewRequest !== viewRequestSequence) return;
   content.innerHTML = `
     <section class="section">
       <label>Additive percent warning limit
@@ -2449,30 +2512,26 @@ async function renderSettings() {
       </label>
       <div class="toolbar"><button id="saveSettings" class="primary">Save Settings</button></div>
     </section>
-    <section class="section">
-      <h2>Turso Deployment Notes</h2>
-      <p>Use TURSO_DATABASE_URL and TURSO_DATABASE_TOKEN on Render. Local development writes to SQLite unless those variables are present.</p>
-    </section>
   `;
-  content.querySelector("#saveSettings").addEventListener("click", async () => {
+  bindAction(content.querySelector("#saveSettings"), async () => {
     await api("/api/settings", { method: "PUT", body: { additive_percent_limit: content.querySelector("#additiveLimit").value } });
     showToast("Settings saved.");
   });
 }
 
-document.querySelectorAll(".nav").forEach((button) => button.addEventListener("click", () => {
-  if (button.dataset.view === "dashboard") renderDashboard();
-  if (button.dataset.view === "import") renderImport();
-  if (button.dataset.view === "drafts") renderDashboard("Draft");
-  if (button.dataset.view === "cards") renderCards();
-  if (button.dataset.view === "archived") renderDashboard("Archived");
-  if (button.dataset.view === "ingredients") renderIngredients();
-  if (button.dataset.view === "productionItems") renderProductionItems();
-  if (button.dataset.view === "settings") renderSettings();
+document.querySelectorAll(".nav").forEach((button) => bindAction(button, () => {
+  if (button.dataset.view === "dashboard") return renderDashboard();
+  if (button.dataset.view === "import") return renderImport();
+  if (button.dataset.view === "drafts") return renderDashboard("Draft");
+  if (button.dataset.view === "cards") return renderCards();
+  if (button.dataset.view === "archived") return renderDashboard("Archived");
+  if (button.dataset.view === "ingredients") return renderIngredients();
+  if (button.dataset.view === "productionItems") return renderProductionItems();
+  if (button.dataset.view === "settings") return renderSettings();
 }));
 
-document.querySelector("#newRecipeBtn").addEventListener("click", () => renderNewRecipeChoice());
-document.querySelector("#importShortcutBtn").addEventListener("click", () => renderImport());
+bindAction(document.querySelector("#newRecipeBtn"), () => renderNewRecipeChoice());
+bindAction(document.querySelector("#importShortcutBtn"), () => renderImport());
 
 // PWA install UI: browsers expose the native prompt differently, so the dialog always provides usable instructions.
 let deferredInstallPrompt = null;
@@ -2545,15 +2604,15 @@ window.addEventListener("appinstalled", () => {
 });
 
 pwaInstallButton.addEventListener("click", openPwaInstallDialog);
-document.querySelector("#closePwaInstallDialog").addEventListener("click", closePwaInstallDialog);
-document.querySelector("#donePwaInstall").addEventListener("click", closePwaInstallDialog);
+bindAction(document.querySelector("#closePwaInstallDialog"), closePwaInstallDialog);
+bindAction(document.querySelector("#donePwaInstall"), closePwaInstallDialog);
 pwaInstallDialog.addEventListener("click", (event) => {
   if (event.target === pwaInstallDialog) closePwaInstallDialog();
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !pwaInstallDialog.classList.contains("hidden")) closePwaInstallDialog();
 });
-runPwaInstallButton.addEventListener("click", async () => {
+bindAction(runPwaInstallButton, async () => {
   if (!deferredInstallPrompt) return;
   deferredInstallPrompt.prompt();
   const choice = await deferredInstallPrompt.userChoice;
@@ -2567,7 +2626,7 @@ runPwaInstallButton.addEventListener("click", async () => {
 
 refreshPwaInstallState();
 document.querySelectorAll(".location-nav__toggle-button").forEach((button) => {
-  button.addEventListener("click", () => {
+  bindAction(button, () => {
     const selectedLocation = button.dataset.location;
     document.querySelectorAll(".location-nav__toggle-button").forEach((toggleButton) => {
       const isSelected = toggleButton.dataset.location === selectedLocation;
@@ -2589,6 +2648,4 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-renderDashboard().catch((err) => {
-  content.innerHTML = `<section class="section"><div class="warning">${err.message}</div></section>`;
-});
+renderDashboard().catch((error) => showToast(error.message));

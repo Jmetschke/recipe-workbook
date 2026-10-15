@@ -1115,3 +1115,6 @@ input[readonly] {
   }
   .resin-blend-input input { width: 100%; min-width: 0; }
 }
+
+button[aria-busy="true"] { cursor: progress; }
+button[aria-busy="true"]::after { content: " …"; }
