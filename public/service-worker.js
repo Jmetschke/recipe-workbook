@@ -1,13 +1,14 @@
 // PWA service worker for installability and a light app-shell fallback.
 // It intentionally keeps API/database traffic online-first and uncached so Render/Turso data stays live.
 // Increment this version when the app shell changes so installed devices receive fresh assets.
-const CACHE_NAME = "recipe-manager-pwa-v9";
+const CACHE_NAME = "recipe-manager-pwa-v10";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css",
   "/app.js",
   "/ui-actions.js",
+  "/formula-allocation.js",
   "/resin-blend.js",
   "/resin-blend-ui.js",
   "/manifest.json",

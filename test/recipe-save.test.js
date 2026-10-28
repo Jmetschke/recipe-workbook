@@ -27,3 +27,16 @@ test('batch saves retain every ingredient and step, and failed replacement leave
  assert(!(await db.listIngredients()).some(i=>i.ingredient_name==='Save check 0'));
  assert.equal((await db.getRecipe(saved.id)).ingredients[0].ingredient_name,'Save check 0');
 });
+
+test('repeated and overlapping recalculations keep one copy of each ingredient and preserve ratios',async()=>{
+ await db.migrate();
+ const ingredients=[.7,.2,.09,.01].map((formula_percent,i)=>({ingredient_name:`Ratio ${i}`,formula_qty:0,formula_percent}));
+ const recipe=await db.createRecipe({name:'Percentage-only formula',batch_size:100,batch_size_mode:'units',unit_weight:10,ingredients,active_additives:[{ingredient_index:3,target_mg_per_unit:100,potency_percent:100}]});
+ for(const units of [200,200,50]) {
+  await Promise.all(Array.from({length:3},()=>db.updateRecipe(recipe.id,{batch_size:units})));
+  const saved=await db.getRecipe(recipe.id);
+  assert.equal(saved.ingredients.length,4);
+  assert.deepEqual(saved.ingredients.map(i=>i.ingredient_name),ingredients.map(i=>i.ingredient_name));
+  saved.ingredients.forEach((row,i)=>assert.ok(Math.abs(row.batch_qty-units*10*ingredients[i].formula_percent)<1e-6));
+ }
+});

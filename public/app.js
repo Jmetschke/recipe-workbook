@@ -1458,35 +1458,9 @@ function applyAdditiveCalculationsToMatches() {
   const ingredients = state.currentRecipe.ingredients || [];
   const totalBatchGrams = numeric(state.currentRecipe.calculations?.total_batch_grams || state.currentRecipe.batch_size);
   if (!ingredients.length || totalBatchGrams <= 0) return 0;
-  const fixedByIndex = new Map();
-  for (const additive of state.currentRecipe.active_additives || []) {
-    const index = Number(additive.ingredient_index);
-    if (!Number.isFinite(index) || !ingredients[index]) continue;
-    fixedByIndex.set(index, numeric(fixedByIndex.get(index)) + additiveRowAmount(additive, state.currentRecipe.calculations));
-  }
-  if (!fixedByIndex.size) return 0;
-
-  const fixedTotal = Array.from(fixedByIndex.values()).reduce((sum, value) => sum + numeric(value), 0);
-  const remainingBatch = Math.max(totalBatchGrams - fixedTotal, 0);
-  const adjustableIndexes = ingredients.map((_, index) => index).filter((index) => !fixedByIndex.has(index));
-  const basisTotal = adjustableIndexes.reduce((sum, index) => sum + numeric(ingredients[index].formula_qty), 0);
-  const equalShare = adjustableIndexes.length ? remainingBatch / adjustableIndexes.length : 0;
-
-  ingredients.forEach((ingredient, index) => {
-    const batchQty = fixedByIndex.has(index)
-      ? numeric(fixedByIndex.get(index))
-      : basisTotal > 0
-        ? remainingBatch * (numeric(ingredient.formula_qty) / basisTotal)
-        : equalShare;
-    ingredient.batch_qty = batchQty;
-    ingredient.formula_qty = batchQty;
-    ingredient.formula_percent = totalBatchGrams > 0 ? batchQty / totalBatchGrams : 0;
-    ingredient.unit = ingredient.unit || "grams";
-    if (fixedByIndex.has(index)) {
-      ingredient.notes = ingredient.notes || "Active/additive calculated from target dose and potency.";
-    }
-  });
-  return fixedByIndex.size;
+  return allocateFormula(ingredients, (state.currentRecipe.active_additives || []).map(row => ({
+    ...row, calculated_grams: additiveRowAmount(row, state.currentRecipe.calculations)
+  })), totalBatchGrams);
 }
 
 function bindActiveAdditiveTool() {
